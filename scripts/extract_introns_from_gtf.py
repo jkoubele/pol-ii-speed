@@ -7,7 +7,7 @@ from pybedtools import BedTool, Interval
 from tqdm import tqdm
 
 
-def extract_genomic_features(gtf_file: Path, output_folder: Path, gtf_source: str) -> None:
+def extract_genomic_features(gtf_file: Path, output_folder: Path, gtf_source: str, min_length=50) -> None:
     assert gtf_source in ('ensembl', 'gencode'), "gtf_source must be either 'ensembl' or 'gencode'."
     gtf_df = pd.read_csv(gtf_file,
                          header=4,
@@ -52,7 +52,8 @@ def extract_genomic_features(gtf_file: Path, output_folder: Path, gtf_source: st
     introns_filtered: list[Interval] = []
     gene_occurrences = defaultdict(int)
     for intron in tqdm(introns, desc="Filtering introns"):
-        if ',' not in intron.name:  # ignoring introns mapped to more than 1 gene
+        # ignoring introns mapped to more than 1 gene, and too short introns (likely artefacts of annotation)
+        if ',' not in intron.name and (intron.end - intron.start) >= min_length:
             gene_occurrences[intron.name] += 1
             intron.name = f"{intron.name}_{gene_occurrences[intron.name]}"
             introns_filtered.append(intron)
@@ -68,7 +69,9 @@ if __name__ == "__main__":
     parser.add_argument('--output_folder')
     parser.add_argument('--gtf_file', help='Path to the input GTF annotation file.')
     parser.add_argument('--gtf_source', help="Either 'ensembl' or 'gencode'.")
+    parser.add_argument('--min_length', default=50, help="Min. intron length")
     args = parser.parse_args()
     extract_genomic_features(gtf_file=Path(args.gtf_file),
                              output_folder=Path(args.output_folder),
-                             gtf_source=args.gtf_source)
+                             gtf_source=args.gtf_source,
+                             min_length=args.min_length)

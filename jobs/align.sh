@@ -66,4 +66,4 @@ bioinfo_tools /bin/sh -c "STAR \
 --limitBAMsortRAM 50000000000 \
 --peOverlapNbasesMin 10; \
 samtools index /output_folder/Aligned.sortedByCoord.out.bam; \
-chmod 777 -R /output_folder"
+chmod a+rwX -R /output_folder"
