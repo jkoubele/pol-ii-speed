@@ -43,7 +43,6 @@ sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol
 ## AA5 mouse
 
 * Align:
-
 ```commandline
 sh align.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/FASTQ_trimmed -o /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/STAR_output -s /cellfile/datapublic/jkoubele/reference_genomes/GRCm39/STAR_index
 ```
@@ -55,7 +54,6 @@ sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mo
 ```
 
 * Remove intronic reads from FASTQ:
-
 ```commandline
 sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/FASTQ_trimmed -o /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/intronic_reads
 ```
@@ -63,33 +61,33 @@ sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol
 ## Mouse myocardium
 
 * Align:
-
 ```commandline
 sh align.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ_trimmed -o /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/STAR_output -s /cellfile/datapublic/jkoubele/reference_genomes/GRCm39/STAR_index
 ```
 
 * Extract intronic reads:
-
 ```commandline
 sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/STAR_output -o /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/intronic_reads -g /cellfile/datapublic/jkoubele/reference_genomes/GRCm39
+```
+
+* Remove intronic reads from FASTQ:
+```commandline
+sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ_trimmed -o /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/intronic_reads
 ```
 
 ## Human Astrocytes
 
 * Align:
-
 ```commandline
 sh align.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/FASTQ -o /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/STAR_output -s /cellfile/datapublic/jkoubele/reference_genomes/GRCh38.p14/STAR_index
 ```
 
 * Extract intronic reads:
-
 ```commandline
 sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/STAR_output -o /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/intronic_reads -g /cellfile/datapublic/jkoubele/reference_genomes/GRCh38.p14
 ```
 
 * Remove intronic reads from FASTQ:
-
 ```commandline
 sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/FASTQ -o /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/intronic_reads
 ```
