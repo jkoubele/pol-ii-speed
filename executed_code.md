@@ -68,6 +68,12 @@ sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol
 sh align.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ_trimmed -o /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/STAR_output -s /cellfile/datapublic/jkoubele/reference_genomes/GRCm39/STAR_index
 ```
 
+* Extract intronic reads:
+
+```commandline
+sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/STAR_output -o /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/intronic_reads -g /cellfile/datapublic/jkoubele/reference_genomes/GRCm39
+```
+
 ## Human Astrocytes
 
 * Align:
