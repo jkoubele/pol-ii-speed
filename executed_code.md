@@ -15,29 +15,35 @@ sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/celega
 ```
 
 * Remove intronic reads from FASTQ:
-
 ```commandline
 sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/celegans_mutants/FASTQ -o /cellfile/datapublic/jkoubele/data_pol_ii/celegans_mutants/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/celegans_mutants/intronic_reads
+```
+
+* Salmon quant on exonic reads:
+```commandline
+sh salmon_quant.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/celegans_mutants/FASTQ_without_intronic_reads -o /cellfile/datapublic/jkoubele/data_pol_ii/celegans_mutants/salmon_output -s /cellfile/datapublic/jkoubele/reference_genomes/WBcel235/transcriptome/salmon_index
 ```
 
 ## Drosophila mutants
 
 * Align:
-
 ```commandline
 sh align.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/FASTQ -o /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/STAR_output -s /cellfile/datapublic/jkoubele/reference_genomes/BDGP6.46/STAR_index
 ```
 
 * Extract intronic reads:
-
 ```commandline
 sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/STAR_output -o /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/intronic_reads -g /cellfile/datapublic/jkoubele/reference_genomes/BDGP6.46
 ```
 
 * Remove intronic reads from FASTQ:
-
 ```commandline
 sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/FASTQ -o /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/intronic_reads
+```
+
+* Salmon quant on exonic reads:
+```commandline
+sh salmon_quant.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/FASTQ_without_intronic_reads -o /cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/salmon_output -s /cellfile/datapublic/jkoubele/reference_genomes/BDGP6.46/transcriptome/salmon_index
 ```
 
 ## AA5 mouse
@@ -48,7 +54,6 @@ sh align.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/FASTQ_trimmed
 ```
 
 * Extract intronic reads:
-
 ```commandline
 sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/STAR_output -o /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/intronic_reads -g /cellfile/datapublic/jkoubele/reference_genomes/GRCm39
 ```
@@ -56,6 +61,11 @@ sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mo
 * Remove intronic reads from FASTQ:
 ```commandline
 sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/FASTQ_trimmed -o /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/intronic_reads
+```
+
+* Salmon quant on exonic reads:
+```commandline
+sh salmon_quant.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/FASTQ_without_intronic_reads -o /cellfile/datapublic/jkoubele/data_pol_ii/aa5_mouse/salmon_output -s /cellfile/datapublic/jkoubele/reference_genomes/GRCm39/transcriptome/salmon_index
 ```
 
 ## Mouse myocardium
@@ -75,6 +85,13 @@ sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/mouse_
 sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ_trimmed -o /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/intronic_reads
 ```
 
+* Salmon quant on exonic reads:
+```commandline
+sh salmon_quant.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ_without_intronic_reads -o /cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/salmon_output -s /cellfile/datapublic/jkoubele/reference_genomes/GRCm39/transcriptome/salmon_index
+```
+
+
+
 ## Human Astrocytes
 
 * Align:
@@ -90,6 +107,11 @@ sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/human_
 * Remove intronic reads from FASTQ:
 ```commandline
 sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/FASTQ -o /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/intronic_reads
+```
+
+* Salmon quant on exonic reads:
+```commandline
+sh salmon_quant.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/FASTQ_without_intronic_reads -o /cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/salmon_output -s /cellfile/datapublic/jkoubele/reference_genomes/GRCh38.p14/transcriptome/salmon_index
 ```
 
 ## Human senescent cells (Apapantonis data AKI46)
@@ -110,4 +132,9 @@ sh extract_intronic_reads.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/senesc
 
 ```commandline
 sh remove_intronic_reads_from_fastq.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/senescent_cell_Apapantonis/FASTQ -o /cellfile/datapublic/jkoubele/data_pol_ii/senescent_cell_Apapantonis/FASTQ_without_intronic_reads -b /cellfile/datapublic/jkoubele/data_pol_ii/senescent_cell_Apapantonis/intronic_reads
+```
+
+* Salmon quant on exonic reads:
+```commandline
+sh salmon_quant.sh -i /cellfile/datapublic/jkoubele/data_pol_ii/senescent_cell_Apapantonis/FASTQ_without_intronic_reads -o /cellfile/datapublic/jkoubele/data_pol_ii/senescent_cell_Apapantonis/salmon_output -s /cellfile/datapublic/jkoubele/reference_genomes/GRCh38.p14/transcriptome/salmon_index
 ```
