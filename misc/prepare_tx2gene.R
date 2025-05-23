@@ -1,16 +1,22 @@
+library(argparse)
 library(GenomicFeatures)
 library(AnnotationDbi)
 library(txdbmaker)
 library(tidyverse)
 
+parser <- ArgumentParser()
+parser$add_argument("--gtf_file",
+                    help = "",
+                    default = '/cellfile/datapublic/jkoubele/reference_genomes/WBcel235/Caenorhabditis_elegans.WBcel235.112.gtf')
+parser$add_argument("--output_folder",
+                    help = "",
+                    default = '/cellfile/datapublic/jkoubele/reference_genomes/WBcel235')
+args <- parser$parse_args()
 
-genome_folder <- "/home/jakub/Desktop/data_pol_ii/reference_genomes"
-gtf_file_name <- "Homo_sapiens.GRCh38.112.gtf"
 
 # Create TxDb object from your Ensembl GTF file
-txdb <- makeTxDbFromGFF(file.path(genome_folder, gtf_file_name),
-format = "gtf")
+txdb <- makeTxDbFromGFF(file.path(args$gtf_file), format = "gtf")
 k <- keys(txdb, keytype = "TXNAME")
-tx2gene <- select(txdb, keys = k, columns = "GENEID", keytype = "TXNAME")
+tx2gene <- AnnotationDbi::select(txdb, keys = k, columns = "GENEID", keytype = "TXNAME")
 
-write_tsv(tx2gene, file.path(genome_folder, 'tx2gene.tsv'))
+write_tsv(tx2gene, file.path(args$output_folder, 'tx2gene.tsv'))
