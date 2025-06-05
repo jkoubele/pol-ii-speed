@@ -1,10 +1,11 @@
-import numpy as np
-import matplotlib.pyplot as plt
 from functools import partial
-from scipy.optimize import minimize_scalar, OptimizeResult
+
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import minimize_scalar
 
 
-def negative_ll(density: np.ndarray, phi: float) -> float:
+def trapezoid_negative_ll(density: np.ndarray, phi: float) -> float:
     num_locations = density.size
     locations = np.linspace(start=1 / (2 * num_locations),
                             stop=1 - 1 / (2 * num_locations),
@@ -14,7 +15,7 @@ def negative_ll(density: np.ndarray, phi: float) -> float:
 
 
 def estimate_phi(density: np.ndarray) -> float:
-    objective_function = partial(negative_ll, density)
+    objective_function = partial(trapezoid_negative_ll, density)
     return minimize_scalar(objective_function,
                            bounds=(0, 1),
                            method='bounded').x
@@ -73,6 +74,27 @@ if __name__ == "__main__":
                  0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
                  0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
                  0.0000]
+
+    density_3 = [0.00903036, 0.00307798, 0.00307798, 0.01729844, 0.01422047,
+                 0.00615595, 0.00806452, 0.00595238, 0.03151891, 0.0123119,
+                 0.00986777, 0.00806452, 0., 0., 0.02093512,
+                 0.03612143, 0.00903036, 0.01056789, 0.01056789, 0.00693851,
+                 0., 0.00307798, 0., 0., 0.,
+                 0.00595238, 0.03014593, 0.03726481, 0.01056789, 0.,
+                 0.01056789, 0., 0.01056789, 0.02421376, 0.01364587,
+                 0.00307798, 0.00903036, 0., 0., 0.,
+                 0., 0., 0., 0., 0.,
+                 0., 0., 0., 0.00307798, 0.,
+                 0., 0.01190476, 0., 0.00307798, 0.00615595,
+                 0.01056789, 0., 0., 0.01190476, 0.,
+                 0., 0.00903036, 0.00903036, 0.02536296, 0.00903036,
+                 0., 0., 0.01863241, 0., 0.,
+                 0.00307798, 0.01652027, 0.00903036, 0.03381871, 0.0426455,
+                 0.01210833, 0.00307798, 0., 0.02401309, 0.01785714,
+                 0., 0., 0., 0., 0.04149199,
+                 0.07069229, 0.0561037, 0.02017285, 0.01672384, 0.00307798,
+                 0.02155696, 0.03170658, 0.0257542, 0.01672384, 0.00806452,
+                 0., 0.00307798, 0.00307798, 0.01498274, 0.00595238]
 
     density = np.array(density_1)
     plot_density(density)
