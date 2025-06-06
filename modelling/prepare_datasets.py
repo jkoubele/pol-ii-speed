@@ -21,8 +21,8 @@ def get_gene_data_with_solution(gene_data: GeneData,
     if gene_data.exon_reads[mask_group_1].sum() == 0 or gene_data.exon_reads[mask_group_2].sum() == 0:
         return None
 
-    mu_1 = float((library_size[mask_group_1] * gene_data.exon_reads[mask_group_1]).mean())
-    mu_2 = float((library_size[mask_group_2] * gene_data.exon_reads[mask_group_2]).mean())
+    mu_1 = float((gene_data.exon_reads[mask_group_1] / library_size[mask_group_1]).mean())
+    mu_2 = float((gene_data.exon_reads[mask_group_2] / library_size[mask_group_2]).mean())
 
     nu_1: dict[str, float] = {}
     nu_2: dict[str, float] = {}
@@ -39,6 +39,7 @@ def get_gene_data_with_solution(gene_data: GeneData,
             continue
 
         coverage_group_1 = gene_data.coverage_density[intron_name][mask_group_1]
+
         aggregate_density_1 = (coverage_group_1 * gene_data.intron_reads[intron_name][mask_group_1].unsqueeze(1)).sum(
             dim=0)
         aggregate_density_1 /= aggregate_density_1.sum()
@@ -57,9 +58,9 @@ def get_gene_data_with_solution(gene_data: GeneData,
             continue
 
         nu_1[intron_name] = float(
-            (gene_data.intron_reads[intron_name][mask_group_1] * library_size[mask_group_1]).mean())
+            (gene_data.intron_reads[intron_name][mask_group_1] / library_size[mask_group_1]).mean())
         nu_2[intron_name] = float(
-            (gene_data.intron_reads[intron_name][mask_group_2] * library_size[mask_group_2]).mean())
+            (gene_data.intron_reads[intron_name][mask_group_2] / library_size[mask_group_2]).mean())
 
         phi_1[intron_name] = intron_phi_1
         phi_2[intron_name] = intron_phi_2
@@ -110,6 +111,7 @@ assert (annotation_df.index == intronic_reads_df.columns).all()
 
 design_matrix = torch.tensor(annotation_df['genotype'] == 'rp2', dtype=float).unsqueeze(1)
 library_size = torch.tensor(library_size_df['library_size_factor'])
+library_size = torch.ones_like(library_size)
 
 coverage_df_by_sample: dict[str, pd.DataFrame] = {}
 for sample_name in annotation_df.index:
@@ -168,7 +170,7 @@ output_folder = project_path / 'train_data'
 output_folder.mkdir(exist_ok=True)
 
 with open(output_folder / 'data_train_with_solutions.pkl', 'wb') as file:
-    pickle.dump({'data_train_with_solutions': data_train_with_solutions,
+    pickle.dump({'gene_data_with_solutions': data_train_with_solutions,
                  'design_matrix': design_matrix,
                  'library_size': library_size},
                 file)

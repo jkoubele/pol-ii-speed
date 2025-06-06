@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -28,13 +29,14 @@ class Pol2Model(nn.Module):
     def __init__(self,
                  num_features: int,
                  intron_names: list[str],
-                 exon_intercept_init: float,
-                 intron_intercepts_init: dict[str, float]):
+                 exon_intercept_init: Optional[float] = None,
+                 intron_intercepts_init: Optional[dict[str, float]] = None):
         super().__init__()
         self.intron_names = intron_names
 
         self.alpha = nn.Parameter(torch.zeros(num_features))
-        self.intercept_exon = nn.Parameter(torch.tensor(exon_intercept_init))
+        self.intercept_exon = nn.Parameter(
+            torch.tensor(exon_intercept_init if exon_intercept_init is not None else 0.0))
 
         self.beta = nn.ParameterDict({
             intron: nn.Parameter(torch.zeros(num_features))
@@ -44,8 +46,9 @@ class Pol2Model(nn.Module):
             for intron in intron_names})
 
         self.intercept_intron = nn.ParameterDict({
-            intron_name: nn.Parameter(torch.tensor(intercept_init))
-            for intron_name, intercept_init in intron_intercepts_init.items()})
+            intron_name: nn.Parameter(
+                torch.tensor(intron_intercepts_init[intron_name] if intron_intercepts_init is not None else 0.0))
+            for intron_name in intron_names})
         self.log_phi_zero = nn.ParameterDict({
             intron: nn.Parameter(torch.tensor(0.0))
             for intron in intron_names})
