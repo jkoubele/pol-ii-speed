@@ -7,10 +7,16 @@ import torch.nn as nn
 
 @dataclass
 class GeneData:
-    exon_reads: torch.tensor
+    exon_reads: torch.Tensor
     intron_names: list[str]
-    intron_reads: dict[str, torch.tensor]
-    coverage_density: dict[str, torch.tensor]
+    intron_reads: dict[str, torch.Tensor]
+    coverage_density: dict[str, torch.Tensor]
+
+    def to(self, device):
+        self.exon_reads = self.exon_reads.to(device)
+        self.intron_reads = {key: value.to(device) for key, value in self.intron_reads.items()}
+        self.coverage_density = {key: value.to(device) for key, value in self.coverage_density.items()}
+        return self
 
 
 @dataclass
@@ -77,10 +83,41 @@ class CoverageLoss(nn.Module):
 
     def __init__(self, num_position_coverage: int = 100):
         super().__init__()
-        self.locations = torch.linspace(start=1 / (2 * num_position_coverage),
-                                        end=1 - 1 / (2 * num_position_coverage),
-                                        steps=num_position_coverage).unsqueeze(0)
+        locations = torch.linspace(start=1 / (2 * num_position_coverage),
+                                   end=1 - 1 / (2 * num_position_coverage),
+                                   steps=num_position_coverage).unsqueeze(0)
+        self.register_buffer("locations", locations)
 
     def forward(self, phi, num_intronic_reads, coverage):
         loss_per_location = -torch.log(1 + phi.unsqueeze(1) - 2 * phi.unsqueeze(1) * self.locations)
         return torch.mean(loss_per_location * coverage * num_intronic_reads.unsqueeze(1))
+
+
+class Pol2TotalLoss(nn.Module):
+    def __init__(self, num_position_coverage: int = 100):
+        super().__init__()
+        self.loss_function_exon = nn.PoissonNLLLoss(log_input=True, full=True)
+        self.loss_function_intron = nn.PoissonNLLLoss(log_input=False, full=True)
+        self.loss_function_coverage = CoverageLoss(num_position_coverage=num_position_coverage)
+
+    def forward(self, gene_data: GeneData,
+                predicted_log_reads_exon: torch.tensor,
+                predicted_reads_intron: dict[str, torch.tensor],
+                phi: dict[str, torch.tensor]):
+        loss_exon = self.loss_function_exon(predicted_log_reads_exon, gene_data.exon_reads)
+        loss_intron = torch.zeros(1, device=self.device)
+        loss_coverage = torch.zeros(1, device=self.device)
+
+        for intron_name in gene_data.intron_names:
+            loss_intron += self.loss_function_intron(
+                predicted_reads_intron[intron_name],
+                gene_data.intron_reads[intron_name]
+            )
+            loss_coverage += self.loss_function_coverage(
+                phi[intron_name],
+                gene_data.intron_reads[intron_name],
+                gene_data.coverage_density[intron_name]
+            )
+
+        total_loss = loss_exon + loss_intron + loss_coverage
+        return total_loss

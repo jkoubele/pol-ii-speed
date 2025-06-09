@@ -9,7 +9,7 @@ from pathlib import Path
 from pol_ii_model import Pol2Model, CoverageLoss, GeneData, GeneDataWithSolution
 import math
 
-project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants')
+project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
 with open(project_path / 'train_data' / 'data_train_with_solutions.pkl', 'rb') as file:
     data_train_with_solutions = pickle.load(file)
 
