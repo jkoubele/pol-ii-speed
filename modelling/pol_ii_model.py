@@ -59,7 +59,7 @@ class Pol2Model(nn.Module):
             intron: nn.Parameter(torch.tensor(0.0))
             for intron in intron_names})
 
-    def forward(self, X, log_library_sizes):
+    def forward(self, X: torch.Tensor, log_library_sizes: torch.Tensor):
         gene_expression_term = X @ self.alpha
         predicted_log_reads_exon = self.intercept_exon + log_library_sizes + gene_expression_term
 
@@ -101,23 +101,18 @@ class Pol2TotalLoss(nn.Module):
         self.loss_function_coverage = CoverageLoss(num_position_coverage=num_position_coverage)
 
     def forward(self, gene_data: GeneData,
-                predicted_log_reads_exon: torch.tensor,
-                predicted_reads_intron: dict[str, torch.tensor],
-                phi: dict[str, torch.tensor]):
+                predicted_log_reads_exon: torch.Tensor,
+                predicted_reads_intron: dict[str, torch.Tensor],
+                phi: dict[str, torch.Tensor]):
         loss_exon = self.loss_function_exon(predicted_log_reads_exon, gene_data.exon_reads)
-        loss_intron = torch.zeros(1, device=self.device)
-        loss_coverage = torch.zeros(1, device=self.device)
 
-        for intron_name in gene_data.intron_names:
-            loss_intron += self.loss_function_intron(
-                predicted_reads_intron[intron_name],
-                gene_data.intron_reads[intron_name]
-            )
-            loss_coverage += self.loss_function_coverage(
-                phi[intron_name],
-                gene_data.intron_reads[intron_name],
-                gene_data.coverage_density[intron_name]
-            )
+        loss_intron = sum(self.loss_function_intron(predicted_reads_intron[name], gene_data.intron_reads[name])
+                          for name in gene_data.intron_names)
+
+        loss_coverage = sum(self.loss_function_coverage(phi[name],
+                                                        gene_data.intron_reads[name],
+                                                        gene_data.coverage_density[name])
+                            for name in gene_data.intron_names)
 
         total_loss = loss_exon + loss_intron + loss_coverage
         return total_loss
