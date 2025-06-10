@@ -111,7 +111,7 @@ assert (annotation_df.index == intronic_reads_df.columns).all()
 
 design_matrix = torch.tensor(annotation_df['genotype'] == 'rp2', dtype=float).unsqueeze(1)
 library_size = torch.tensor(library_size_df['library_size_factor'])
-library_size = torch.ones_like(library_size)
+library_size = torch.ones_like(library_size) # TODO: Don't forget to uncomment to actually acount for difference in library size
 
 coverage_df_by_sample: dict[str, pd.DataFrame] = {}
 for sample_name in annotation_df.index:

@@ -90,14 +90,14 @@ class CoverageLoss(nn.Module):
 
     def forward(self, phi, num_intronic_reads, coverage):
         loss_per_location = -torch.log(1 + phi.unsqueeze(1) - 2 * phi.unsqueeze(1) * self.locations)
-        return torch.mean(loss_per_location * coverage * num_intronic_reads.unsqueeze(1))
+        return torch.sum(loss_per_location * coverage * num_intronic_reads.unsqueeze(1))
 
 
 class Pol2TotalLoss(nn.Module):
     def __init__(self, num_position_coverage: int = 100):
         super().__init__()
-        self.loss_function_exon = nn.PoissonNLLLoss(log_input=True, full=True)
-        self.loss_function_intron = nn.PoissonNLLLoss(log_input=False, full=True)
+        self.loss_function_exon = nn.PoissonNLLLoss(log_input=True, full=True, reduction='sum')
+        self.loss_function_intron = nn.PoissonNLLLoss(log_input=False, full=True, reduction='sum')
         self.loss_function_coverage = CoverageLoss(num_position_coverage=num_position_coverage)
 
     def forward(self, gene_data: GeneData,
@@ -110,8 +110,8 @@ class Pol2TotalLoss(nn.Module):
                           for name in gene_data.intron_names)
 
         loss_coverage = sum(self.loss_function_coverage(phi[name],
-                                                        gene_data.intron_reads[name],
-                                                        gene_data.coverage_density[name])
+                            gene_data.intron_reads[name],
+                            gene_data.coverage_density[name])
                             for name in gene_data.intron_names)
 
         total_loss = loss_exon + loss_intron + loss_coverage

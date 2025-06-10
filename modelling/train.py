@@ -50,7 +50,8 @@ def train_model(gene_data: GeneData,
     return model
 
 
-project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
+# project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
+project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/')
 with open(project_path / 'train_data' / 'data_train_with_solutions.pkl', 'rb') as file:
     data_train_with_solutions = pickle.load(file)
 
@@ -101,20 +102,20 @@ for name, size in zip(parameter_names, parameter_sizes):
     start += size
 total_params = start
 
-H_matrix = torch.zeros((total_params, total_params), device=device)
+hessian_matrix = torch.zeros((total_params, total_params), device=device)
 
 for name1, block_row in H.items():
     idx1_start, idx1_end = index_map[name1]
     for name2, block in block_row.items():
         idx2_start, idx2_end = index_map[name2]
-        H_matrix[idx1_start:idx1_end, idx2_start:idx2_end] = block.reshape(
+        hessian_matrix[idx1_start:idx1_end, idx2_start:idx2_end] = block.reshape(
             idx1_end - idx1_start, idx2_end - idx2_start
         )
 
-H_inv = torch.linalg.pinv(H_matrix).detach()
+hessian_matrix_inverse = torch.linalg.pinv(hessian_matrix).detach()
 
 # Standard errors (sqrt of diagonal elements)
-standard_errors = torch.sqrt(torch.diag(H_inv)).cpu().numpy()
+standard_errors = torch.sqrt(torch.diag(hessian_matrix_inverse)).cpu().numpy()
 
 # %%
 parameter_data: list[dict] = []
@@ -139,5 +140,5 @@ for name, size in zip(parameter_names, parameter_sizes):
 
 df_param = pd.DataFrame(data=parameter_data)
 df_param['SE'] = standard_errors
-df_param['z_value'] = df_param['value'] / standard_errors
-df_param['p_value'] = 2 * (1 - stats.norm.cdf(np.abs(df_param['z_value'])))
+df_param['z_score'] = df_param['value'] / standard_errors
+df_param['p_value'] = 2 * (1 - stats.norm.cdf(np.abs(df_param['z_score'])))
