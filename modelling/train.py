@@ -5,9 +5,12 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.optim as optim
+import torch.nn as nn
 from scipy import stats
 from torch.func import functional_call, hessian
 from tqdm import trange
+from read_location_model import estimate_phi
+from matplotlib import pyplot as plt
 
 from pol_ii_model import Pol2Model, GeneData, Pol2TotalLoss
 
@@ -33,10 +36,13 @@ def train_model(gene_data: GeneData,
     optimizer = optim.LBFGS(model.parameters(),
                             lr=1.0,
                             max_iter=100,
-                            tolerance_change=1e-9,
-                            tolerance_grad=1e-7,
+                            tolerance_change=1e-09,
+                            tolerance_grad=1e-07,
                             history_size=100,
                             line_search_fn=None)
+
+    # optimizer = optim.Adam(model.parameters(),lr=1e-1)
+    # When using Adam, set max_epochs to about 1-10k
 
     def closure():
         optimizer.zero_grad()
@@ -142,3 +148,84 @@ df_param = pd.DataFrame(data=parameter_data)
 df_param['SE'] = standard_errors
 df_param['z_score'] = df_param['value'] / standard_errors
 df_param['p_value'] = 2 * (1 - stats.norm.cdf(np.abs(df_param['z_score'])))
+
+
+# %%
+# Train model by finding analytical solution
+
+def fit_analytical_solution(gene_data: GeneData,
+                            X: torch.Tensor,
+                            log_library_size: torch.Tensor,
+                            device: str
+                            ) -> Pol2Model:
+    assert X.shape[1] == 1
+    assert set(X.flatten().tolist()) == set([0, 1])
+    threshold_phi = 0.01  # to assert that phi lies in (threshold_phi, 1-threshold_phi)
+
+    model_analytical_fit = Pol2Model(num_features=1,
+                                     intron_names=gene_data.intron_names)
+
+    mask_group_1 = X.flatten() == 0
+    mask_group_2 = X.flatten() == 1
+
+    mu_1 = (gene_data.exon_reads[mask_group_1] / library_sizes[mask_group_1]).mean()
+    mu_2 = (gene_data.exon_reads[mask_group_2] / library_sizes[mask_group_2]).mean()
+
+    assert mu_1 > 0 and mu_2 > 0
+
+    model_analytical_fit.intercept_exon = nn.Parameter(torch.log(mu_1))
+    model_analytical_fit.alpha = nn.Parameter(torch.log(mu_2 / mu_1).unsqueeze(0))
+
+    for intron_name in gene_data.intron_names:
+        intron_reads = gene_data.intron_reads[intron_name]
+        coverage_density = gene_data.coverage_density[intron_name]
+
+        nu_1 = (intron_reads[mask_group_1] / library_sizes[mask_group_1]).mean()
+        nu_2 = (intron_reads[mask_group_2] / library_sizes[mask_group_2]).mean()
+        assert nu_1 > 0 and nu_2 > 0
+
+        coverage_group_1 = coverage_density[mask_group_1]
+        aggregate_density_1 = (coverage_group_1 * intron_reads[mask_group_1].unsqueeze(1)).sum(dim=0)
+        aggregate_density_1 /= aggregate_density_1.sum()
+
+        coverage_group_2 = coverage_density[mask_group_2]
+        aggregate_density_2 = (coverage_group_2 * intron_reads[mask_group_2].unsqueeze(1)).sum(dim=0)
+        aggregate_density_2 /= aggregate_density_2.sum()
+
+        phi_1 = torch.tensor(estimate_phi(aggregate_density_1.numpy()), dtype=torch.float32)
+        phi_2 = torch.tensor(estimate_phi(aggregate_density_2.numpy()), dtype=torch.float32)
+
+        assert (1 - threshold_phi > phi_1 > threshold_phi)
+        assert (1 - threshold_phi > phi_2 > threshold_phi)
+
+        model_analytical_fit.intercept_intron[intron_name] = nn.Parameter(torch.log((1 - phi_1) * nu_1))
+        model_analytical_fit.log_phi_zero[intron_name] = nn.Parameter(torch.log(phi_1 / (1 - phi_1)))
+
+        model_analytical_fit.beta[intron_name] = nn.Parameter(
+            (torch.log(mu_2 / mu_1) - torch.log(nu_2 / nu_1) - torch.log(phi_2 / phi_1)).unsqueeze(0))
+
+        model_analytical_fit.gamma[intron_name] = nn.Parameter(
+            (-torch.log(mu_2 / mu_1) + torch.log(nu_2 / nu_1) + torch.log((1 - phi_2) / (1 - phi_1))).unsqueeze(0))
+
+        model_analytical_fit = model_analytical_fit.to(device)
+    return model_analytical_fit
+
+
+model_analytical_fit = fit_analytical_solution(gene_data, X, log_library_size, device)
+
+analytical_parameters = dict(model_analytical_fit.named_parameters())
+# %%
+# Compare analytical and numerical solution 
+assert analytical_parameters.keys() == model_parameters.keys()
+
+for name, param_analytical in analytical_parameters.items():
+    param_numerical = model_parameters[name]
+    if not torch.allclose(param_numerical, param_analytical, rtol=1e-2):
+        print("------OUT OF TOLERANCE--------")
+        print(f"{name=}")
+        print(f"{param_numerical=}")
+        print(f"{param_analytical=}")
+        abs_diff = torch.abs(param_numerical - param_analytical)
+        rel_diff = abs_diff / param_analytical
+        print(f"{abs_diff=}")
+        print(f"{rel_diff=}")

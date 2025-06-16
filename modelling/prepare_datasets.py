@@ -72,9 +72,10 @@ def get_gene_data_with_solution(gene_data: GeneData,
     gene_data_filtered = GeneData(exon_reads=gene_data.exon_reads,
                                   intron_names=introns_to_keep,
                                   intron_reads={intron_name: reads for intron_name, reads in
-                                                gene_data.intron_reads.items() if intron_name in intron_name},
+                                                gene_data.intron_reads.items() if intron_name in introns_to_keep},
                                   coverage_density={intron_name: density for intron_name, density in
-                                                    gene_data.coverage_density.items() if intron_name in intron_name})
+                                                    gene_data.coverage_density.items() if
+                                                    intron_name in introns_to_keep})
 
     gene_data_with_solution = GeneDataWithSolution(gene_data=gene_data_filtered,
                                                    mu_1=mu_1,
@@ -109,9 +110,10 @@ assert (annotation_df.index == library_size_df.index).all()
 assert (annotation_df.index == exonic_reads_df.columns).all()
 assert (annotation_df.index == intronic_reads_df.columns).all()
 
-design_matrix = torch.tensor(annotation_df['genotype'] == 'rp2', dtype=float).unsqueeze(1)
+design_matrix = torch.tensor(annotation_df['genotype'] == 'rp2', dtype=torch.float32).unsqueeze(1)
 library_size = torch.tensor(library_size_df['library_size_factor'])
-library_size = torch.ones_like(library_size) # TODO: Don't forget to uncomment to actually acount for difference in library size
+library_size = torch.ones_like(
+    library_size)  # TODO: Don't forget to uncomment to actually acount for difference in library size
 
 coverage_df_by_sample: dict[str, pd.DataFrame] = {}
 for sample_name in annotation_df.index:
@@ -143,7 +145,7 @@ for gene_id, row_exon in tqdm(exonic_reads_df.iterrows(),
     intron_reads: dict[str, torch.tensor] = {}
     coverage_density: dict[str, torch.tensor] = {}
     for intron_name, row_intron in gene_introns_df.iterrows():
-        intron_reads[intron_name] = torch.tensor(row_intron, dtype=float)
+        intron_reads[intron_name] = torch.tensor(row_intron, dtype=torch.float32)
 
         densities = []
         for sample_name in annotation_df.index:
@@ -152,8 +154,8 @@ for gene_id, row_exon in tqdm(exonic_reads_df.iterrows(),
                 coverage += 1  # put uniform density for introns without any coverage
             densities.append(coverage / coverage.sum())
 
-        coverage_density[intron_name] = torch.tensor(densities, dtype=float)
-    gene_data = GeneData(exon_reads=torch.tensor(row_exon, dtype=float),
+        coverage_density[intron_name] = torch.tensor(densities, dtype=torch.float32)
+    gene_data = GeneData(exon_reads=torch.tensor(row_exon, dtype=torch.float32),
                          intron_names=list(gene_introns_df.index),
                          intron_reads=intron_reads,
                          coverage_density=coverage_density)
