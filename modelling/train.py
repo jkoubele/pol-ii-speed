@@ -1,18 +1,20 @@
 import pickle
 from pathlib import Path
 
+from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-import torch.optim as optim
 import torch.nn as nn
+import torch.optim as optim
 from scipy import stats
 from torch.func import functional_call, hessian
 from tqdm import trange
-from read_location_model import estimate_phi
-from matplotlib import pyplot as plt
 
 from pol_ii_model import Pol2Model, GeneData, Pol2TotalLoss
+from read_location_model import estimate_phi
+
+HessianDict = dict[str, dict[str, torch.Tensor]]  # structure outputed by Pytorch hessian() function
 
 
 def train_model(gene_data: GeneData,
@@ -22,7 +24,6 @@ def train_model(gene_data: GeneData,
                 device: str,
                 max_epochs=100
                 ) -> Pol2Model:
-    X = torch.tensor(design_matrix.to_numpy()).float().to(device)
     model = Pol2Model(num_features=X.shape[1],
                       intron_names=gene_data.intron_names,
                       exon_intercept_init=float(torch.log((gene_data.exon_reads / library_sizes).mean())),
@@ -54,112 +55,6 @@ def train_model(gene_data: GeneData,
         loss = optimizer.step(closure)
     return model
 
-
-# project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
-project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/')
-with open(project_path / 'train_data' / 'data_train_with_solutions.pkl', 'rb') as file:
-    data_train_with_solutions = pickle.load(file)
-
-# gene_data, design_matrix and library_sizes are input to model training
-gene_data = data_train_with_solutions['gene_data_with_solutions'][0].gene_data
-
-# design_matrix = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1],
-#                                    'dummy': 3 * [1] + 6 * [0] + 3 * [1]})
-
-design_matrix = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1]})
-
-library_sizes = torch.ones(len(design_matrix)).float() * 0.1
-
-# torch.manual_seed(0)
-library_sizes = torch.rand(12) * 10 + 0.5
-
-use_cuda = True
-
-# Above is the input to the 'main' per-gene function
-
-feature_names = design_matrix.columns.to_list()
-device = torch.device("cuda" if torch.cuda.is_available() and use_cuda else "cpu")
-
-X = torch.tensor(design_matrix.to_numpy()).float().to(device)
-library_sizes /= library_sizes.max()  # This would be good to move to data preparation
-log_library_size = torch.log(library_sizes).to(device)
-pol_2_total_loss = Pol2TotalLoss().to(device)
-
-model = train_model(gene_data, X, log_library_size, pol_2_total_loss, device)
-
-model_parameters = dict(model.named_parameters())
-
-
-def loss_by_model_parameters(model_parameters):
-    outputs = functional_call(model, model_parameters, (X, log_library_size))
-    predicted_log_reads_exon, predicted_reads_intron, phi = outputs
-    return pol_2_total_loss(gene_data, predicted_log_reads_exon, predicted_reads_intron, phi)
-
-
-# Compute the Hessian
-H = hessian(loss_by_model_parameters)(model_parameters)
-
-# Flatten the Hessian into a 2D matrix
-parameter_names = []
-parameter_sizes = []
-for name, p in model_parameters.items():
-    parameter_names.append(name)
-    parameter_sizes.append(p.numel())
-
-index_map = {}
-start = 0
-for name, size in zip(parameter_names, parameter_sizes):
-    index_map[name] = (start, start + size)
-    start += size
-total_params = start
-
-hessian_matrix = torch.zeros((total_params, total_params), device=device)
-
-for name1, block_row in H.items():
-    idx1_start, idx1_end = index_map[name1]
-    for name2, block in block_row.items():
-        idx2_start, idx2_end = index_map[name2]
-        hessian_matrix[idx1_start:idx1_end, idx2_start:idx2_end] = block.reshape(
-            idx1_end - idx1_start, idx2_end - idx2_start
-        )
-
-hessian_matrix = hessian_matrix.detach()
-
-inverse_naive = torch.linalg.inv(hessian_matrix)
-hessian_matrix_inverse = torch.linalg.pinv(hessian_matrix)
-
-# Standard errors (sqrt of diagonal elements)
-standard_errors = torch.sqrt(torch.diag(hessian_matrix_inverse)).cpu().numpy()
-
-# %%
-parameter_data: list[dict] = []
-for name, size in zip(parameter_names, parameter_sizes):
-    if '.' in name:
-        parameter_type = name.split('.', 1)[0]
-        intron_name = name.split('.', 1)[1]
-    else:
-        parameter_type = name.split('.', 1)[0]
-        intron_name = None
-
-    parameter_value_list = [model_parameters[name].item()] if model_parameters[name].numel() == 1 \
-        else model_parameters[name].tolist()
-    for feature_index in range(size):
-        feature_name = None
-        if parameter_type in ('alpha', 'beta', 'gamma'):
-            feature_name = feature_names[feature_index]
-        parameter_data.append({'parameter_type': parameter_type,
-                               'intron_name': intron_name,
-                               'feature_name': feature_name,
-                               'value': parameter_value_list[feature_index]})
-
-df_param = pd.DataFrame(data=parameter_data)
-df_param['SE'] = standard_errors
-df_param['z_score'] = df_param['value'] / standard_errors
-df_param['p_value'] = 2 * (1 - stats.norm.cdf(np.abs(df_param['z_score'])))
-
-
-# %%
-# Train model by finding analytical solution
 
 def fit_analytical_solution(gene_data: GeneData,
                             X: torch.Tensor,
@@ -220,21 +115,174 @@ def fit_analytical_solution(gene_data: GeneData,
     return model_analytical_fit
 
 
-model_analytical_fit = fit_analytical_solution(gene_data, X, library_sizes, device)
+def get_param_names_and_sizes(model_parameters: dict[str, nn.Parameter]
+                              ) -> tuple[list[str], list[int]]:
+    parameter_names: list[str] = []
+    parameter_sizes: list[int] = []
+    for name, parameter in model_parameters.items():
+        parameter_names.append(name)
+        parameter_sizes.append(parameter.numel())
+    return parameter_names, parameter_sizes
 
-analytical_parameters = dict(model_analytical_fit.named_parameters())
-# %%
-# Compare analytical and numerical solution 
-assert analytical_parameters.keys() == model_parameters.keys()
 
-for name, param_analytical in analytical_parameters.items():
-    param_numerical = model_parameters[name]
-    if not torch.allclose(param_numerical, param_analytical, rtol=3 * 1e-3):
-        print("------OUT OF TOLERANCE--------")
-        print(f"{name=}")
-        print(f"{param_numerical=}")
-        print(f"{param_analytical=}")
-        abs_diff = torch.abs(param_numerical - param_analytical)
-        rel_diff = abs_diff / param_analytical
-        print(f"{abs_diff=}")
-        print(f"{rel_diff=}")
+def hessian_matrix_from_hessian_dict(hessian_dict: HessianDict,
+                                     parameter_names: list[str],
+                                     parameter_sizes: list[int]) -> torch.Tensor:
+    # Flatten the Hessian into a 2D matrix
+    index_map = {}
+    start = 0
+    for name, size in zip(parameter_names, parameter_sizes):
+        index_map[name] = (start, start + size)
+        start += size
+    total_params = start
+
+    hessian_matrix = torch.zeros((total_params, total_params), device=device)
+
+    for name1, block_row in hessian_dict.items():
+        idx1_start, idx1_end = index_map[name1]
+        for name2, block in block_row.items():
+            idx2_start, idx2_end = index_map[name2]
+            hessian_matrix[idx1_start:idx1_end, idx2_start:idx2_end] = block.reshape(
+                idx1_end - idx1_start, idx2_end - idx2_start
+            )
+
+    hessian_matrix = hessian_matrix.detach()
+    return hessian_matrix
+
+
+def compute_hessian_matrix(model: Pol2Model,
+                           pol_2_total_loss: Pol2TotalLoss,
+                           X: torch.Tensor,
+                           log_library_size: torch.Tensor) -> torch.Tensor:
+    model_parameters = dict(model.named_parameters())
+    parameter_names, parameter_sizes = get_param_names_and_sizes(model_parameters)
+
+    def loss_by_model_parameters(model_parameters):
+        outputs = functional_call(model, model_parameters, (X, log_library_size))
+        predicted_log_reads_exon, predicted_reads_intron, phi = outputs
+        return pol_2_total_loss(gene_data, predicted_log_reads_exon, predicted_reads_intron, phi)
+
+    hessian_dict = hessian(loss_by_model_parameters)(model_parameters)
+    hessian_matrix = hessian_matrix_from_hessian_dict(hessian_dict, parameter_names, parameter_sizes)
+    return hessian_matrix
+
+
+def get_param_df(model: Pol2Model,
+                 feature_names: list[str]) -> pd.DataFrame:
+    model_parameters = dict(model.named_parameters())
+    parameter_names, parameter_sizes = get_param_names_and_sizes(model_parameters)
+    parameter_data: list[dict] = []
+    for name, size in zip(parameter_names, parameter_sizes):
+        if '.' in name:
+            parameter_type = name.split('.', 1)[0]
+            intron_name = name.split('.', 1)[1]
+        else:
+            parameter_type = name.split('.', 1)[0]
+            intron_name = None
+
+        parameter_value_list = [model_parameters[name].item()] if model_parameters[name].numel() == 1 \
+            else model_parameters[name].tolist()
+        for feature_index in range(size):
+            feature_name = None
+            if parameter_type in ('alpha', 'beta', 'gamma'):
+                feature_name = feature_names[feature_index]
+            parameter_data.append({'parameter_type': parameter_type,
+                                   'intron_name': intron_name,
+                                   'feature_name': feature_name,
+                                   'value': parameter_value_list[feature_index]})
+
+    df_param = pd.DataFrame(data=parameter_data)
+    return df_param
+
+
+def compare_model_parameters(model_analytical: Pol2Model, model_numerical: Pol2Model, rtol=1e-2) -> None:
+    analytical_parameters = dict(model_analytical.named_parameters())
+    numerical_parameters = dict(model_numerical.named_parameters())
+    assert analytical_parameters.keys() == numerical_parameters.keys()
+
+    for name, param_analytical in analytical_parameters.items():
+        param_numerical = numerical_parameters[name]
+        if not torch.allclose(param_numerical, param_analytical, rtol=rtol):
+            print("------OUT OF TOLERANCE--------")
+            print(f"{name=}")
+            print(f"{param_numerical=}")
+            print(f"{param_analytical=}")
+            abs_diff = torch.abs(param_numerical - param_analytical)
+            rel_diff = abs_diff / param_analytical
+            print(f"{abs_diff=}")
+            print(f"{rel_diff=}")
+
+
+def compare_model_predictions(model_analytical: Pol2Model, model_numerical: Pol2Model, rtol=1e-3) -> None:
+    predicted_log_reads_exon_numerical, predicted_reads_intron_numerical, phi_numerical = model_numerical(X,
+                                                                                                          log_library_size)
+    predicted_log_reads_exon_analytical, predicted_reads_intron_analytical, phi_analytical = model_analytical(X,
+                                                                                                              log_library_size)
+
+    if not torch.allclose(predicted_log_reads_exon_numerical, predicted_log_reads_exon_analytical, rtol=rtol):
+        print(50 * "-")
+        print(f"{predicted_log_reads_exon_numerical=}")
+        print(f"{predicted_log_reads_exon_analytical=}")
+
+    assert predicted_reads_intron_numerical.keys() == predicted_reads_intron_analytical.keys()
+    for intron_name in predicted_reads_intron_numerical.keys():
+        reads_numerical = predicted_reads_intron_numerical[intron_name]
+        reads_analytical = predicted_reads_intron_analytical[intron_name]
+
+        if not torch.allclose(reads_numerical, reads_analytical, rtol=rtol):
+            print(50 * "-")
+            print(f"{reads_numerical=}")
+            print(f"{reads_analytical=}")
+
+        phi_intron_numerical = phi_numerical[intron_name]
+        phi_intron_analytical = phi_analytical[intron_name]
+        if not torch.allclose(phi_intron_numerical, phi_intron_analytical, rtol=rtol):
+            print(50 * "-")
+            print(f"{phi_intron_numerical=}")
+            print(f"{phi_intron_analytical=}")
+
+
+if __name__ == "__main__":
+    # project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
+    project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/')
+    with open(project_path / 'train_data' / 'data_train_with_solutions.pkl', 'rb') as file:
+        data_train_with_solutions = pickle.load(file)
+
+    gene_data = data_train_with_solutions['gene_data_with_solutions'][0].gene_data
+
+    design_matrix = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1],
+                                       'dummy': 3 * [1] + 6 * [0] + 3 * [1]})
+
+    # design_matrix = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1]})
+    library_sizes = torch.ones(len(design_matrix)).float()
+    use_cuda = True
+    # Above is the input to the 'main' per-gene function
+
+    feature_names = design_matrix.columns.to_list()
+    device = torch.device("cuda" if torch.cuda.is_available() and use_cuda else "cpu")
+
+    X = torch.tensor(design_matrix.to_numpy()).float().to(device)
+    library_sizes /= library_sizes.max()  # This would be good to move to data preparation maybe
+    log_library_size = torch.log(library_sizes).to(device)
+    pol_2_total_loss = Pol2TotalLoss().to(device)
+
+    model_numerical = train_model(gene_data, X, log_library_size, pol_2_total_loss, device)
+
+    hessian_matrix = compute_hessian_matrix(model=model_numerical,
+                                            pol_2_total_loss=pol_2_total_loss,
+                                            X=X,
+                                            log_library_size=log_library_size)
+    inverse_naive = torch.linalg.inv(hessian_matrix)
+    hessian_matrix_inverse = torch.linalg.pinv(hessian_matrix)
+
+    # Standard errors (sqrt of diagonal elements)
+    standard_errors = torch.sqrt(torch.diag(hessian_matrix_inverse)).cpu().numpy()
+
+    df_param = get_param_df(model_numerical, feature_names)
+    df_param['SE'] = standard_errors
+    df_param['z_score'] = df_param['value'] / standard_errors
+    df_param['p_value'] = 2 * (1 - stats.norm.cdf(np.abs(df_param['z_score'])))
+
+    model_analytical = fit_analytical_solution(gene_data, X, library_sizes, device)
+    compare_model_parameters(model_analytical=model_analytical, model_numerical=model_numerical)
+    compare_model_predictions(model_analytical=model_analytical, model_numerical=model_numerical)
