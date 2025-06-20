@@ -287,7 +287,7 @@ if __name__ == "__main__":
     design_matrix = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1],
                                        'dummy': 3 * [1] + 6 * [0] + 3 * [1]})
 
-    # design_matrix = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1]})
+    design_matrix = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1]})
     library_sizes = torch.ones(len(design_matrix)).float()
     use_cuda = True
     # Above is the input to the 'main' per-gene function
@@ -301,16 +301,25 @@ if __name__ == "__main__":
     pol_2_total_loss = Pol2TotalLoss().to(device)
 
     model_numerical = train_model(gene_data, X, log_library_size, pol_2_total_loss, device)
-    df_param = get_param_df(model_numerical, feature_names)
+    df_param_numerical = get_param_df(model_numerical, feature_names)
 
-    hessian_matrix = compute_hessian_matrix(model=model_numerical,
-                                            pol_2_total_loss=pol_2_total_loss,
-                                            X=X,
-                                            log_library_size=log_library_size)
+    hessian_matrix_numerical = compute_hessian_matrix(model=model_numerical,
+                                                      pol_2_total_loss=pol_2_total_loss,
+                                                      X=X,
+                                                      log_library_size=log_library_size)
 
-    df_param = add_wald_test_results(df_param, hessian_matrix)
+    df_param = add_wald_test_results(df_param_numerical, hessian_matrix_numerical)
 
     # %%
-    # model_analytical = fit_analytical_solution(gene_data, X, library_sizes, device)
-    # compare_model_parameters(model_analytical=model_analytical, model_numerical=model_numerical)
-    # compare_model_predictions(model_analytical=model_analytical, model_numerical=model_numerical)
+    model_analytical = fit_analytical_solution(gene_data, X, library_sizes, device)
+    compare_model_parameters(model_analytical=model_analytical, model_numerical=model_numerical)
+    compare_model_predictions(model_analytical=model_analytical, model_numerical=model_numerical)
+
+    df_param_analytical = get_param_df(model_analytical, feature_names)
+
+    hessian_matrix_analytical = compute_hessian_matrix(model=model_analytical,
+                                                       pol_2_total_loss=pol_2_total_loss,
+                                                       X=X,
+                                                       log_library_size=log_library_size)
+
+    df_param_analytical = add_wald_test_results(df_param_analytical, hessian_matrix_analytical)
