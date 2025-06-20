@@ -4,6 +4,7 @@ from pathlib import Path
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -242,6 +243,39 @@ def compare_model_predictions(model_analytical: Pol2Model, model_numerical: Pol2
             print(f"{phi_intron_analytical=}")
 
 
+def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) -> pd.DataFrame:
+    """
+    Adds results of the Wald test to the dataframe with model parameters.
+    """
+    rank = torch.linalg.matrix_rank(hessian_matrix)
+
+    # Rank-revealing QR is currently not available in Pytorch (see https://github.com/pytorch/pytorch/issues/10454),
+    # so we are going to use SciPy implementation.
+    _, _, qr_pivots = scipy.linalg.qr(hessian_matrix.cpu().numpy(), pivoting=True)
+    identifiable_indices = np.sort(qr_pivots[:rank])
+    hessian_subset = hessian_matrix[identifiable_indices][:, identifiable_indices]
+
+    assert set(qr_pivots) == set(df_param.index)
+
+    # hessian_subset should have a full rank by the way it is constructed:
+    # assert hessian_subset.shape[0] == torch.linalg.matrix_rank(hessian_subset)    
+
+    cov_matrix = torch.linalg.pinv(hessian_subset).cpu()
+    standard_errors = torch.sqrt(torch.diag(cov_matrix)).numpy()
+
+    df_param['SE'] = np.nan
+    df_param['z_score'] = np.nan
+    df_param['p_value_wald'] = np.nan
+    df_param['identifiable'] = df_param.index.isin(identifiable_indices)
+
+    df_param.loc[identifiable_indices, 'SE'] = standard_errors
+    df_param.loc[identifiable_indices, 'z_score'] = df_param.loc[identifiable_indices, 'value'] / standard_errors
+    df_param.loc[identifiable_indices, 'p_value_wald'] = 2 * (
+            1 - stats.norm.cdf(np.abs(df_param.loc[identifiable_indices, 'z_score'])))
+
+    return df_param
+
+
 if __name__ == "__main__":
     # project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
     project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/')
@@ -267,22 +301,16 @@ if __name__ == "__main__":
     pol_2_total_loss = Pol2TotalLoss().to(device)
 
     model_numerical = train_model(gene_data, X, log_library_size, pol_2_total_loss, device)
+    df_param = get_param_df(model_numerical, feature_names)
 
     hessian_matrix = compute_hessian_matrix(model=model_numerical,
                                             pol_2_total_loss=pol_2_total_loss,
                                             X=X,
                                             log_library_size=log_library_size)
-    inverse_naive = torch.linalg.inv(hessian_matrix)
-    hessian_matrix_inverse = torch.linalg.pinv(hessian_matrix)
 
-    # Standard errors (sqrt of diagonal elements)
-    standard_errors = torch.sqrt(torch.diag(hessian_matrix_inverse)).cpu().numpy()
+    df_param = add_wald_test_results(df_param, hessian_matrix)
 
-    df_param = get_param_df(model_numerical, feature_names)
-    df_param['SE'] = standard_errors
-    df_param['z_score'] = df_param['value'] / standard_errors
-    df_param['p_value'] = 2 * (1 - stats.norm.cdf(np.abs(df_param['z_score'])))
-
-    model_analytical = fit_analytical_solution(gene_data, X, library_sizes, device)
-    compare_model_parameters(model_analytical=model_analytical, model_numerical=model_numerical)
-    compare_model_predictions(model_analytical=model_analytical, model_numerical=model_numerical)
+    # %%
+    # model_analytical = fit_analytical_solution(gene_data, X, library_sizes, device)
+    # compare_model_parameters(model_analytical=model_analytical, model_numerical=model_numerical)
+    # compare_model_predictions(model_analytical=model_analytical, model_numerical=model_numerical)
