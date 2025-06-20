@@ -308,7 +308,7 @@ if __name__ == "__main__":
                                                       X=X,
                                                       log_library_size=log_library_size)
 
-    df_param = add_wald_test_results(df_param_numerical, hessian_matrix_numerical)
+    df_param_numerical = add_wald_test_results(df_param_numerical, hessian_matrix_numerical)
 
     # %%
     model_analytical = fit_analytical_solution(gene_data, X, library_sizes, device)
