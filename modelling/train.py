@@ -64,7 +64,7 @@ def fit_analytical_solution(gene_data: GeneData,
                             ) -> Pol2Model:
     assert X.shape[1] == 1
     assert set(X.flatten().tolist()) == {0, 1}
-    threshold_phi = 0.01  # to assert that phi lies in (threshold_phi, 1-threshold_phi)
+    threshold_phi = 0.001  # to assert that phi lies in (threshold_phi, 1-threshold_phi)
 
     model_analytical_fit = Pol2Model(num_features=1,
                                      intron_names=gene_data.intron_names)
@@ -100,8 +100,8 @@ def fit_analytical_solution(gene_data: GeneData,
         phi_1 = torch.tensor(estimate_phi(aggregate_density_1.numpy()), dtype=torch.float32)
         phi_2 = torch.tensor(estimate_phi(aggregate_density_2.numpy()), dtype=torch.float32)
 
-        assert (1 - threshold_phi > phi_1 > threshold_phi)
-        assert (1 - threshold_phi > phi_2 > threshold_phi)
+        phi_1 = torch.clip(phi_1, min=threshold_phi, max=1 - threshold_phi)
+        phi_2 = torch.clip(phi_2, min=threshold_phi, max=1 - threshold_phi)
 
         model_analytical_fit.intercept_intron[intron_name] = nn.Parameter(torch.log((1 - phi_1) * nu_1))
         model_analytical_fit.log_phi_zero[intron_name] = nn.Parameter(torch.log(phi_1 / (1 - phi_1)))
@@ -128,7 +128,8 @@ def get_param_names_and_sizes(model_parameters: dict[str, nn.Parameter]
 
 def hessian_matrix_from_hessian_dict(hessian_dict: HessianDict,
                                      parameter_names: list[str],
-                                     parameter_sizes: list[int]) -> torch.Tensor:
+                                     parameter_sizes: list[int],
+                                     device: str) -> torch.Tensor:
     # Flatten the Hessian into a 2D matrix
     index_map = {}
     start = 0
@@ -143,7 +144,7 @@ def hessian_matrix_from_hessian_dict(hessian_dict: HessianDict,
         idx1_start, idx1_end = index_map[name1]
         for name2, block in block_row.items():
             idx2_start, idx2_end = index_map[name2]
-            hessian_matrix[idx1_start:idx1_end, idx2_start:idx2_end] = block.reshape(
+            hessian_matrix[idx1_start:idx1_end, idx2_start:idx2_end] = block.detach().reshape(
                 idx1_end - idx1_start, idx2_end - idx2_start
             )
 
@@ -154,7 +155,9 @@ def hessian_matrix_from_hessian_dict(hessian_dict: HessianDict,
 def compute_hessian_matrix(model: Pol2Model,
                            pol_2_total_loss: Pol2TotalLoss,
                            X: torch.Tensor,
-                           log_library_size: torch.Tensor) -> torch.Tensor:
+                           log_library_size: torch.Tensor,
+                           gene_data: GeneData,
+                           device: str) -> torch.Tensor:
     model_parameters = dict(model.named_parameters())
     parameter_names, parameter_sizes = get_param_names_and_sizes(model_parameters)
 
@@ -164,7 +167,7 @@ def compute_hessian_matrix(model: Pol2Model,
         return pol_2_total_loss(gene_data, predicted_log_reads_exon, predicted_reads_intron, phi)
 
     hessian_dict = hessian(loss_by_model_parameters)(model_parameters)
-    hessian_matrix = hessian_matrix_from_hessian_dict(hessian_dict, parameter_names, parameter_sizes)
+    hessian_matrix = hessian_matrix_from_hessian_dict(hessian_dict, parameter_names, parameter_sizes, device)
     return hessian_matrix
 
 
@@ -276,6 +279,7 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     return df_param
 
 
+# %%
 if __name__ == "__main__":
     # project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
     project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/')
