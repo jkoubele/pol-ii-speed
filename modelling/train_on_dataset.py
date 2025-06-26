@@ -19,7 +19,7 @@ from tqdm import trange, tqdm
 from pol_ii_model import Pol2Model, GeneData, Pol2TotalLoss
 from read_location_model import estimate_phi
 
-from train import fit_analytical_solution, get_param_df, compute_hessian_matrix, add_wald_test_results
+from train import fit_analytical_solution, get_param_df, compute_hessian_matrix, add_wald_test_results, train_model
 
 
 
@@ -42,24 +42,37 @@ pol_2_total_loss = Pol2TotalLoss().to(device)
 log_library_size = torch.log(library_sizes).to(device)
 
 results = []
-for gene_data in tqdm(data_train):    
-    try:
-        model_analytical = fit_analytical_solution(gene_data, design_matrix, library_sizes, device)
-        df_param_analytical = get_param_df(model_analytical, feature_names)
+for gene_data in tqdm(data_train):   
+    model_analytical = fit_analytical_solution(gene_data, design_matrix, library_sizes, device)
+    df_param_analytical = get_param_df(model_analytical, feature_names)
+
+    hessian_matrix_analytical = compute_hessian_matrix(model=model_analytical,
+                                                       pol_2_total_loss=pol_2_total_loss,
+                                                       X=design_matrix,
+                                                       log_library_size=log_library_size,
+                                                       gene_data=gene_data,
+                                                       device=device)
+
+    df_param_analytical = add_wald_test_results(df_param_analytical, hessian_matrix_analytical)
+    df_param_analytical['gene'] = gene_data.intron_names[0].split('_')[0]
     
-        hessian_matrix_analytical = compute_hessian_matrix(model=model_analytical,
-                                                           pol_2_total_loss=pol_2_total_loss,
-                                                           X=design_matrix,
-                                                           log_library_size=log_library_size,
-                                                           gene_data=gene_data,
-                                                           device=device)
+    model_numerical = fit_n(gene_data, design_matrix, library_sizes, device)
+    df_param_analytical = get_param_df(model_analytical, feature_names)
+
+    hessian_matrix_analytical = compute_hessian_matrix(model=model_analytical,
+                                                       pol_2_total_loss=pol_2_total_loss,
+                                                       X=design_matrix,
+                                                       log_library_size=log_library_size,
+                                                       gene_data=gene_data,
+                                                       device=device)
+
+    df_param_analytical = add_wald_test_results(df_param_analytical, hessian_matrix_analytical)
+    df_param_analytical['gene'] = gene_data.intron_names[0].split('_')[0]
     
-        df_param_analytical = add_wald_test_results(df_param_analytical, hessian_matrix_analytical)
-        df_param_analytical['gene'] = gene_data.intron_names[0].split('_')[0]
-        results.append(df_param_analytical)
+    
+    results.append(df_param_analytical)
         
-    except Exception as e:
-        print(f"Failed on gene {gene_data.intron_names[0]}: {e}")
+   
     
 df_all = pd.concat(results, ignore_index=True)
 

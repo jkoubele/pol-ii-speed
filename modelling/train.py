@@ -11,8 +11,10 @@ import torch.optim as optim
 from scipy import stats
 from torch.func import functional_call, hessian
 from tqdm import trange
+from scipy.stats import chi2
 
-from pol_ii_model import Pol2Model, GeneData, Pol2TotalLoss
+from typing import Optional
+from pol_ii_model import Pol2Model, GeneData, Pol2TotalLoss, ParameterMask
 from read_location_model import estimate_phi
 
 HessianDict = dict[str, dict[str, torch.Tensor]]  # structure outputed by Pytorch hessian() function
@@ -23,13 +25,19 @@ def train_model(gene_data: GeneData,
                 log_library_size: torch.Tensor,
                 pol_2_total_loss: Pol2TotalLoss,
                 device: str,
-                max_epochs=100
+                max_epochs=100,
+                mask_alpha: Optional[ParameterMask] = None,
+                mask_beta: Optional[ParameterMask] = None,
+                mask_gamma: Optional[ParameterMask] = None
                 ) -> Pol2Model:
     model = Pol2Model(num_features=X.shape[1],
                       intron_names=gene_data.intron_names,
                       exon_intercept_init=float(torch.log((gene_data.exon_reads / library_sizes).mean())),
                       intron_intercepts_init={intron_name: float(torch.log((intron_reads / library_sizes).mean()))
-                                              for intron_name, intron_reads in gene_data.intron_reads.items()})
+                                              for intron_name, intron_reads in gene_data.intron_reads.items()},
+                      mask_alpha=mask_alpha,
+                      mask_beta=mask_beta,
+                      mask_gamma=mask_gamma)
     model = model.to(device)
     pol_2_total_loss = pol_2_total_loss.to(device)
     gene_data = gene_data.to(device)
@@ -310,10 +318,67 @@ if __name__ == "__main__":
     hessian_matrix_numerical = compute_hessian_matrix(model=model_numerical,
                                                       pol_2_total_loss=pol_2_total_loss,
                                                       X=X,
-                                                      log_library_size=log_library_size)
+                                                      log_library_size=log_library_size,
+                                                      gene_data=gene_data,
+                                                      device=device)
 
     df_param_numerical = add_wald_test_results(df_param_numerical, hessian_matrix_numerical)
-
+    
+    # LRT
+    predicted_log_reads_exon, predicted_reads_intron, phi = model_numerical(X, log_library_size)
+    loss_unrestricted = pol_2_total_loss(gene_data, predicted_log_reads_exon, predicted_reads_intron, phi)    
+    df_param_numerical['LRT_statistics'] = None
+    df_param_numerical['p_value_LRT'] = None
+    
+    #TODO: Separate LRT to a function
+    for feature_index, feature_name in enumerate(feature_names):        
+        # Test for alpha
+        model_restricted = train_model(gene_data, X, log_library_size, pol_2_total_loss, device,
+                                       mask_alpha=ParameterMask(feature_index=feature_index, value=0.0))    
+        predicted_log_reads_exon_restricted, predicted_reads_intron_restricted, phi_restricted = model_restricted(X, log_library_size)
+        loss_restricted = pol_2_total_loss(gene_data,
+                                           predicted_log_reads_exon_restricted, 
+                                           predicted_reads_intron_restricted,
+                                           phi_restricted)
+        lrt_statistics = 2 * (loss_restricted-loss_unrestricted).item()
+        p_value_lrt = 1 - chi2.cdf(lrt_statistics, df=1)
+        
+        dataframe_row_mask = (df_param_numerical['parameter_type'] == 'alpha') & (df_param_numerical['feature_name'] == feature_name)
+        df_param_numerical.loc[dataframe_row_mask, 'LRT_statistics'] = lrt_statistics
+        df_param_numerical.loc[dataframe_row_mask, 'p_value_LRT'] = p_value_lrt
+        
+        for intron_name in gene_data.intron_names:
+            # Test for beta
+            model_restricted = train_model(gene_data, X, log_library_size, pol_2_total_loss, device,
+                                           mask_beta=ParameterMask(feature_index=feature_index, value=0.0, intron_name=intron_name))    
+            predicted_log_reads_exon_restricted, predicted_reads_intron_restricted, phi_restricted = model_restricted(X, log_library_size)
+            loss_restricted = pol_2_total_loss(gene_data,
+                                               predicted_log_reads_exon_restricted, 
+                                               predicted_reads_intron_restricted,
+                                               phi_restricted)
+            lrt_statistics = 2 * (loss_restricted-loss_unrestricted).item()
+            p_value_lrt = 1 - chi2.cdf(lrt_statistics, df=1)
+            
+            dataframe_row_mask = (df_param_numerical['parameter_type'] == 'beta') & (df_param_numerical['feature_name'] == feature_name) & (df_param_numerical['intron_name'] == intron_name)
+            df_param_numerical.loc[dataframe_row_mask, 'LRT_statistics'] = lrt_statistics
+            df_param_numerical.loc[dataframe_row_mask, 'p_value_LRT'] = p_value_lrt
+            
+            # Test for gamma
+            model_restricted = train_model(gene_data, X, log_library_size, pol_2_total_loss, device,
+                                           mask_gamma=ParameterMask(feature_index=feature_index, value=0.0, intron_name=intron_name))    
+            predicted_log_reads_exon_restricted, predicted_reads_intron_restricted, phi_restricted = model_restricted(X, log_library_size)
+            loss_restricted = pol_2_total_loss(gene_data,
+                                               predicted_log_reads_exon_restricted, 
+                                               predicted_reads_intron_restricted,
+                                               phi_restricted)
+            lrt_statistics = 2 * (loss_restricted-loss_unrestricted).item()
+            p_value_lrt = 1 - chi2.cdf(lrt_statistics, df=1)
+            
+            dataframe_row_mask = (df_param_numerical['parameter_type'] == 'gamma') & (df_param_numerical['feature_name'] == feature_name) & (df_param_numerical['intron_name'] == intron_name)
+            df_param_numerical.loc[dataframe_row_mask, 'LRT_statistics'] = lrt_statistics
+            df_param_numerical.loc[dataframe_row_mask, 'p_value_LRT'] = p_value_lrt
+    df_param_numerical['Wald_minus_LRT'] = df_param_numerical['p_value_wald'] - df_param_numerical['p_value_LRT']
+    print(f"{p_value_lrt}")
     # %%
     model_analytical = fit_analytical_solution(gene_data, X, library_sizes, device)
     compare_model_parameters(model_analytical=model_analytical, model_numerical=model_numerical)
@@ -324,6 +389,8 @@ if __name__ == "__main__":
     hessian_matrix_analytical = compute_hessian_matrix(model=model_analytical,
                                                        pol_2_total_loss=pol_2_total_loss,
                                                        X=X,
-                                                       log_library_size=log_library_size)
+                                                       log_library_size=log_library_size,
+                                                       gene_data=gene_data,
+                                                       device=device)
 
     df_param_analytical = add_wald_test_results(df_param_analytical, hessian_matrix_analytical)

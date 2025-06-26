@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, NamedTuple
 
 import torch
 import torch.nn as nn
@@ -30,13 +30,22 @@ class GeneDataWithSolution:
     phi_2: dict[str, float]
 
 
+class ParameterMask(NamedTuple):
+    feature_index: int
+    value: float
+    intron_name: Optional[str] = None
+
+
 class Pol2Model(nn.Module):
 
     def __init__(self,
                  num_features: int,
                  intron_names: list[str],
                  exon_intercept_init: Optional[float] = None,
-                 intron_intercepts_init: Optional[dict[str, float]] = None):
+                 intron_intercepts_init: Optional[dict[str, float]] = None,
+                 mask_alpha: Optional[ParameterMask] = None,
+                 mask_beta: Optional[ParameterMask] = None,
+                 mask_gamma: Optional[ParameterMask] = None):
         super().__init__()
         self.intron_names = intron_names
 
@@ -59,15 +68,33 @@ class Pol2Model(nn.Module):
             intron: nn.Parameter(torch.tensor(0.0))
             for intron in intron_names})
 
+        self.mask_alpha = mask_alpha
+        self.mask_beta = mask_beta
+        self.mask_gamma = mask_gamma
+
     def forward(self, X: torch.Tensor, log_library_sizes: torch.Tensor):
-        gene_expression_term = X @ self.alpha
+        alpha = self.alpha
+        if self.mask_alpha is not None:
+            alpha = self.alpha.clone()
+            alpha[self.mask_alpha.feature_index] = self.mask_alpha.value
+        gene_expression_term = X @ alpha
         predicted_log_reads_exon = self.intercept_exon + log_library_sizes + gene_expression_term
 
         predicted_reads_intron = {}
         phi = {}
         for intron_name in self.intron_names:
-            speed_term = X @ self.beta[intron_name]
-            splicing_term = X @ self.gamma[intron_name]
+            beta = self.beta[intron_name]
+            if self.mask_beta is not None and self.mask_beta.intron_name == intron_name:
+                beta = self.beta[intron_name].clone()
+                beta[self.mask_beta.feature_index] = self.mask_beta.value
+
+            gamma = self.gamma[intron_name]
+            if self.mask_gamma is not None and self.mask_gamma.intron_name == intron_name:
+                gamma = self.gamma[intron_name].clone()
+                gamma[self.mask_gamma.feature_index] = self.mask_gamma.value
+
+            speed_term = X @ beta
+            splicing_term = X @ gamma
 
             phi[intron_name] = torch.sigmoid(self.log_phi_zero[intron_name] - speed_term - splicing_term)
 
@@ -110,8 +137,8 @@ class Pol2TotalLoss(nn.Module):
                           for name in gene_data.intron_names)
 
         loss_coverage = sum(self.loss_function_coverage(phi[name],
-                            gene_data.intron_reads[name],
-                            gene_data.coverage_density[name])
+                                                        gene_data.intron_reads[name],
+                                                        gene_data.coverage_density[name])
                             for name in gene_data.intron_names)
 
         total_loss = loss_exon + loss_intron + loss_coverage
