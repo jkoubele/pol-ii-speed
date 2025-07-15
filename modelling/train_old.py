@@ -22,7 +22,7 @@ HessianDict = dict[str, dict[str, torch.Tensor]]  # structure outputed by Pytorc
 
 def train_model(gene_data: GeneData,
                 X: torch.Tensor,
-                log_library_size: torch.Tensor,
+                library_sizes: torch.Tensor,
                 pol_2_total_loss: Pol2TotalLoss,
                 device: str,
                 max_epochs=100,
@@ -30,6 +30,7 @@ def train_model(gene_data: GeneData,
                 mask_beta: Optional[ParameterMask] = None,
                 mask_gamma: Optional[ParameterMask] = None
                 ) -> Pol2Model:
+    log_library_size = torch.log(library_sizes).to(device)
     model = Pol2Model(num_features=X.shape[1],
                       intron_names=gene_data.intron_names,
                       exon_intercept_init=float(torch.log((gene_data.exon_reads / library_sizes).mean())),
@@ -225,7 +226,11 @@ def compare_model_parameters(model_analytical: Pol2Model, model_numerical: Pol2M
             print(f"{rel_diff=}")
 
 
-def compare_model_predictions(model_analytical: Pol2Model, model_numerical: Pol2Model, rtol=1e-3) -> None:
+def compare_model_predictions(model_analytical: Pol2Model, 
+                              model_numerical: Pol2Model,
+                              X:torch.Tensor, 
+                              log_library_size: torch.Tensor,
+                              rtol=1e-3) -> None:
     predicted_log_reads_exon_numerical, predicted_reads_intron_numerical, phi_numerical = model_numerical(X,
                                                                                                           log_library_size)
     predicted_log_reads_exon_analytical, predicted_reads_intron_analytical, phi_analytical = model_analytical(X,
@@ -289,8 +294,8 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
 
 # %%
 if __name__ == "__main__":
-    # project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
-    project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/')
+    project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')
+    # project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/')
     with open(project_path / 'train_data' / 'data_train_with_solutions.pkl', 'rb') as file:
         data_train_with_solutions = pickle.load(file)
 
@@ -300,19 +305,21 @@ if __name__ == "__main__":
                                        'dummy': 3 * [1] + 6 * [0] + 3 * [1]})
 
     design_matrix = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1]})
-    library_sizes = torch.ones(len(design_matrix)).float()
+    
     use_cuda = True
     # Above is the input to the 'main' per-gene function
 
     feature_names = design_matrix.columns.to_list()
     device = torch.device("cuda" if torch.cuda.is_available() and use_cuda else "cpu")
+    device = 'cpu'
 
     X = torch.tensor(design_matrix.to_numpy()).float().to(device)
+    library_sizes = torch.ones(len(design_matrix)).float().to(device)
     library_sizes /= library_sizes.max()  # This would be good to move to data preparation maybe
     log_library_size = torch.log(library_sizes).to(device)
     pol_2_total_loss = Pol2TotalLoss().to(device)
 
-    model_numerical = train_model(gene_data, X, log_library_size, pol_2_total_loss, device)
+    model_numerical = train_model(gene_data, X, library_sizes, pol_2_total_loss, device)
     df_param_numerical = get_param_df(model_numerical, feature_names)
 
     hessian_matrix_numerical = compute_hessian_matrix(model=model_numerical,
@@ -333,7 +340,7 @@ if __name__ == "__main__":
     #TODO: Separate LRT to a function
     for feature_index, feature_name in enumerate(feature_names):        
         # Test for alpha
-        model_restricted = train_model(gene_data, X, log_library_size, pol_2_total_loss, device,
+        model_restricted = train_model(gene_data, X, library_sizes, pol_2_total_loss, device,
                                        mask_alpha=ParameterMask(feature_index=feature_index, value=0.0))    
         predicted_log_reads_exon_restricted, predicted_reads_intron_restricted, phi_restricted = model_restricted(X, log_library_size)
         loss_restricted = pol_2_total_loss(gene_data,
@@ -349,7 +356,7 @@ if __name__ == "__main__":
         
         for intron_name in gene_data.intron_names:
             # Test for beta
-            model_restricted = train_model(gene_data, X, log_library_size, pol_2_total_loss, device,
+            model_restricted = train_model(gene_data, X, library_sizes, pol_2_total_loss, device,
                                            mask_beta=ParameterMask(feature_index=feature_index, value=0.0, intron_name=intron_name))    
             predicted_log_reads_exon_restricted, predicted_reads_intron_restricted, phi_restricted = model_restricted(X, log_library_size)
             loss_restricted = pol_2_total_loss(gene_data,
@@ -364,7 +371,7 @@ if __name__ == "__main__":
             df_param_numerical.loc[dataframe_row_mask, 'p_value_LRT'] = p_value_lrt
             
             # Test for gamma
-            model_restricted = train_model(gene_data, X, log_library_size, pol_2_total_loss, device,
+            model_restricted = train_model(gene_data, X, library_sizes, pol_2_total_loss, device,
                                            mask_gamma=ParameterMask(feature_index=feature_index, value=0.0, intron_name=intron_name))    
             predicted_log_reads_exon_restricted, predicted_reads_intron_restricted, phi_restricted = model_restricted(X, log_library_size)
             loss_restricted = pol_2_total_loss(gene_data,
@@ -382,7 +389,9 @@ if __name__ == "__main__":
     # %%
     model_analytical = fit_analytical_solution(gene_data, X, library_sizes, device)
     compare_model_parameters(model_analytical=model_analytical, model_numerical=model_numerical)
-    compare_model_predictions(model_analytical=model_analytical, model_numerical=model_numerical)
+    compare_model_predictions(model_analytical=model_analytical,
+                              model_numerical=model_numerical, X=X, 
+                              log_library_size=log_library_size)
 
     df_param_analytical = get_param_df(model_analytical, feature_names)
 

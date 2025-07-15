@@ -19,7 +19,7 @@ from tqdm import trange, tqdm
 from pol_ii_model import Pol2Model, GeneData, Pol2TotalLoss
 from read_location_model import estimate_phi
 
-from train import fit_analytical_solution, get_param_df, compute_hessian_matrix, add_wald_test_results, train_model
+from train_old import fit_analytical_solution, get_param_df, compute_hessian_matrix, add_wald_test_results, train_model
 
 
 

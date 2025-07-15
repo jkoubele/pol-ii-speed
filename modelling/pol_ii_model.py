@@ -36,6 +36,71 @@ class ParameterMask(NamedTuple):
     intron_name: Optional[str] = None
 
 
+class Pol2ModelOptimized(nn.Module):
+
+    def __init__(self,
+                 feature_names: list[str],
+                 intron_names: list[str],
+                 ):
+        super().__init__()
+        self.feature_names = feature_names
+        self.intron_names = intron_names
+
+        num_features = len(feature_names)
+        num_introns = len(intron_names)
+
+        self.alpha = nn.Parameter(torch.zeros(num_features))
+        self.intercept_exon = nn.Parameter(torch.zeros(1))
+
+        self.beta = nn.Parameter(torch.zeros(num_features, num_introns))
+        self.gamma = nn.Parameter(torch.zeros(num_features, num_introns))
+
+        self.intercept_intron = nn.Parameter(torch.zeros(num_introns))
+        self.log_phi_zero = nn.Parameter(torch.zeros(num_introns))
+
+        self.mask_alpha = None
+        self.mask_beta = None
+        self.mask_gamma = None
+
+    def initialize_intercepts(self, gene_data: GeneData, library_sizes: torch.Tensor) -> None:
+        with torch.no_grad():
+            device = self.intercept_exon.device  # use model’s parameter device
+            exon_reads = gene_data.exon_reads.to(device)
+            library_sizes = library_sizes.to(device)
+            self.intercept_exon.data = torch.log(exon_reads.mean() / library_sizes.mean())
+            for i, intron_name in enumerate(self.intron_names):
+                intron_reads = gene_data.intron_reads[intron_name].to(device)
+                mean_intron_value = intron_reads.mean() / library_sizes.mean()
+                self.intercept_intron.data[i] = torch.log(mean_intron_value)
+
+    def forward(self, X: torch.Tensor, log_library_sizes: torch.Tensor):
+        alpha = self.alpha
+        if self.mask_alpha is not None:
+            pass
+            # alpha = self.alpha.clone()
+            # alpha[self.mask_alpha.feature_index] = self.mask_alpha.value
+
+        gene_expression_term = X @ alpha
+        predicted_log_reads_exon = self.intercept_exon + log_library_sizes + gene_expression_term
+
+        beta = self.beta
+        gamma = self.gamma
+        # TODO: handle masking for LRT
+
+        speed_term = X @ beta
+        splicing_term = X @ gamma
+
+        phi = torch.sigmoid(self.log_phi_zero - speed_term - splicing_term)  # (num_samples, num_introns)
+
+        intron_gene_expression_term = self.intercept_intron + log_library_sizes.unsqueeze(
+            1) + gene_expression_term.unsqueeze(1)
+        reads_intronic_polymerases = torch.exp(intron_gene_expression_term + self.log_phi_zero - speed_term)
+        reads_unspliced_transcripts = torch.exp(intron_gene_expression_term + splicing_term)
+        predicted_reads_intron = reads_intronic_polymerases + reads_unspliced_transcripts
+
+        return predicted_log_reads_exon, predicted_reads_intron, phi
+
+
 class Pol2Model(nn.Module):
 
     def __init__(self,
@@ -140,6 +205,44 @@ class Pol2TotalLoss(nn.Module):
                                                         gene_data.intron_reads[name],
                                                         gene_data.coverage_density[name])
                             for name in gene_data.intron_names)
+
+        total_loss = loss_exon + loss_intron + loss_coverage
+        return total_loss
+
+
+class CoverageLossOptimized(nn.Module):
+
+    def __init__(self, num_position_coverage: int = 100):
+        super().__init__()
+        locations = torch.linspace(start=1 / (2 * num_position_coverage),
+                                   end=1 - 1 / (2 * num_position_coverage),
+                                   steps=num_position_coverage)
+        self.register_buffer("locations", locations)
+
+    def forward(self, phi, coverage):
+        loss_per_location = -torch.log(1 + phi.unsqueeze(2) * (1 - 2 * self.locations))
+        return torch.sum(loss_per_location * coverage)
+
+
+class Pol2TotalLossOptimized(nn.Module):
+    def __init__(self, num_position_coverage: int = 100):
+        super().__init__()
+        self.loss_function_exon = nn.PoissonNLLLoss(log_input=True, full=True, reduction='sum')
+        self.loss_function_intron = nn.PoissonNLLLoss(log_input=False, full=True, reduction='sum')
+        self.loss_function_coverage = CoverageLossOptimized(num_position_coverage=num_position_coverage)
+
+    def forward(self,
+                reads_exon: torch.Tensor,
+                reads_introns: torch.Tensor,
+                coverage: torch.Tensor,
+                predicted_log_reads_exon: torch.Tensor,
+                predicted_reads_intron: torch.Tensor,
+                phi: torch.Tensor):
+        loss_exon = self.loss_function_exon(predicted_log_reads_exon, reads_exon)
+
+        loss_intron = self.loss_function_intron(predicted_reads_intron, reads_introns)
+
+        loss_coverage = self.loss_function_coverage(phi, coverage)
 
         total_loss = loss_exon + loss_intron + loss_coverage
         return total_loss
