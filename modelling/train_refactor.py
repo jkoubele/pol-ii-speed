@@ -6,11 +6,16 @@ from torch import optim
 import pandas as pd
 import numpy as np
 
-from tqdm import trange
+from tqdm import trange, tqdm
 from dataclasses import dataclass
 from pol_ii_model_refactor import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 from torch.func import functional_call, hessian
 from time import time
+from scipy import stats
+
+import scipy
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
 def train_model(gene_data: GeneData,
@@ -19,14 +24,14 @@ def train_model(gene_data: GeneData,
                 device: str,
                 max_epochs=100,
                 max_patience=5,
-                loss_change_tolerance=1e-7
+                loss_change_tolerance=1e-6
                 ) -> tuple[Pol2Model, float]:
     model = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)
     model.initialize_intercepts(gene_data, library_sizes)
 
     optimizer = optim.LBFGS(model.parameters(),
                             lr=1.0,
-                            max_iter=50,
+                            max_iter=100,
                             tolerance_change=1e-09,
                             tolerance_grad=1e-07,
                             history_size=100,
@@ -48,7 +53,7 @@ def train_model(gene_data: GeneData,
     previous_loss = None
     patience_counter = 0
 
-    for epoch in trange(max_epochs):
+    for epoch in range(max_epochs):
         loss = optimizer.step(closure).item()
 
         if previous_loss is not None:
@@ -65,32 +70,105 @@ def train_model(gene_data: GeneData,
     return model, loss
 
 
-# def get_param_names_and_sizes(model_parameters: dict[str, nn.Parameter]
-#                               ) -> tuple[list[str], list[int]]:
-#     parameter_names: list[str] = []
-#     parameter_sizes: list[int] = []
-#     for name, parameter in model_parameters.items():
-#         parameter_names.append(name)
-#         parameter_sizes.append(parameter.numel())
-#     return parameter_names, parameter_sizes
-
-
 def flatten_hessian_dict(hessian_dict, model_parameters):
     param_names = list(model_parameters.keys())
     param_sizes = {name: model_parameters[name].numel() for name in param_names}
     param_offsets = {name: sum(param_sizes[n] for n in param_names[:i])
                      for i, name in enumerate(param_names)}
-    total_size = sum(param_sizes.values())
-    H = torch.zeros((total_size, total_size))
+    total_param_size = sum(param_sizes.values())
+    hessian_matrix = torch.zeros((total_param_size, total_param_size))
 
-    for i_name in param_names:
-        for j_name in param_names:
-            block = hessian_dict[i_name][j_name].detach()
-            block = block.reshape(param_sizes[i_name], param_sizes[j_name])
-            H[param_offsets[i_name]:param_offsets[i_name] + param_sizes[i_name],
-            param_offsets[j_name]:param_offsets[j_name] + param_sizes[j_name]] = block
+    for param_1 in param_names:
+        for param_2 in param_names:
+            block = hessian_dict[param_1][param_2].detach()
+            block = block.reshape(param_sizes[param_1], param_sizes[param_2])
+            hessian_matrix[
+            param_offsets[param_1]:param_offsets[param_1] + param_sizes[param_1],
+            param_offsets[param_2]:param_offsets[param_2] + param_sizes[param_2]
+            ] = block
 
-    return H
+    return hessian_matrix
+
+
+def get_fisher_information_matrix(model: Pol2Model,
+                                  pol_2_total_loss: Pol2TotalLoss,
+                                  gene_data: GeneData,
+                                  dataset_metadata: DatasetMetadata) -> torch.Tensor:
+    model_parameters = dict(model.named_parameters())
+
+    def loss_by_model_parameters(model_parameters):
+        outputs = functional_call(model, model_parameters, (dataset_metadata.design_matrix,
+                                                            dataset_metadata.log_library_sizes))
+        predicted_log_reads_exon, predicted_reads_intron, phi = outputs
+        return pol_2_total_loss(reads_exon=gene_data.exon_reads,
+                                reads_introns=gene_data.intron_reads,
+                                coverage=gene_data.coverage,
+                                predicted_log_reads_exon=predicted_log_reads_exon,
+                                predicted_reads_intron=predicted_reads_intron,
+                                phi=phi)
+
+    hessian_dict = hessian(loss_by_model_parameters)(model_parameters)
+    hessian_matrix = flatten_hessian_dict(hessian_dict, model_parameters)
+    return hessian_matrix
+
+
+def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) -> pd.DataFrame:
+    """
+    Adds results of the Wald test to the dataframe with model parameters.
+    """
+    df_param = df_param.copy()
+    rank = torch.linalg.matrix_rank(hessian_matrix)
+
+    # Rank-revealing QR is currently not available in Pytorch (see https://github.com/pytorch/pytorch/issues/10454),
+    # so we are going to use SciPy implementation.
+    _, _, qr_pivots = scipy.linalg.qr(hessian_matrix.cpu().numpy(), pivoting=True)
+    identifiable_indices = np.sort(qr_pivots[:rank])
+    hessian_subset = hessian_matrix[identifiable_indices][:, identifiable_indices]
+
+    assert set(qr_pivots) == set(df_param.index)
+
+    # hessian_subset should have a full rank by the way it is constructed:
+    # assert hessian_subset.shape[0] == torch.linalg.matrix_rank(hessian_subset)    
+
+    cov_matrix = torch.linalg.pinv(hessian_subset).cpu()
+    standard_errors = torch.sqrt(torch.diag(cov_matrix)).numpy()
+
+    df_param['SE'] = np.nan
+    df_param['z_score'] = np.nan
+    df_param['p_value_wald'] = np.nan
+    df_param['identifiable'] = df_param.index.isin(identifiable_indices)
+
+    df_param.loc[identifiable_indices, 'SE'] = standard_errors
+    df_param.loc[identifiable_indices, 'z_score'] = df_param.loc[identifiable_indices, 'value'] / standard_errors
+    df_param.loc[identifiable_indices, 'p_value_wald'] = 2 * (
+            1 - stats.norm.cdf(np.abs(df_param.loc[identifiable_indices, 'z_score'])))
+
+    return df_param
+
+
+def get_results_for_gene(gene_data: GeneData,
+                         dataset_metadata: DatasetMetadata,
+                         device='cpu',
+                         perform_wald_test=True) -> pd.DataFrame:
+    gene_data = gene_data.to(device)
+    dataset_metadata = dataset_metadata.to(device)
+    pol_2_total_loss = Pol2TotalLoss().to(device)
+
+    model, loss = train_model(gene_data=gene_data,
+                              dataset_metadata=dataset_metadata,
+                              pol_2_total_loss=pol_2_total_loss,
+                              device=device)
+
+    param_df = model.get_param_df()
+    param_df['gene_name'] = gene_data.gene_name
+    if perform_wald_test:
+        fisher_information_matrix = get_fisher_information_matrix(model=model,
+                                                                  pol_2_total_loss=pol_2_total_loss,
+                                                                  gene_data=gene_data,
+                                                                  dataset_metadata=dataset_metadata)
+
+        param_df = add_wald_test_results(param_df, fisher_information_matrix)
+    return param_df
 
 
 if __name__ == "__main__":
@@ -99,8 +177,7 @@ if __name__ == "__main__":
     with open(input_folder / 'train_data.pkl', 'rb') as file:
         train_data = pickle.load(file)
 
-    gene_data_dict = train_data[0]
-    gene_data = GeneData(**gene_data_dict)
+    gene_data_list = [GeneData(**gene_data_dict) for gene_data_dict in train_data]
 
     # Load or create dataset metadata    
     design_matrix_df = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1],
@@ -117,65 +194,29 @@ if __name__ == "__main__":
                                        log_library_sizes=torch.log(library_sizes),
                                        feature_names=feature_names)
 
-    # both gene_data and dataset_metadata are loaded now
     device = 'cpu'
+    # %%
+    # all_results = []
+    # for gene_data in tqdm(gene_data_list):
+    #     all_results.append(get_results_for_gene(gene_data=gene_data, dataset_metadata=dataset_metadata))
+
+    # %%
+
+    gene_data = gene_data_list[0]
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
 
     pol_2_total_loss = Pol2TotalLoss().to(device)
 
-    t0 = time()
     model, loss = train_model(gene_data=gene_data,
                               dataset_metadata=dataset_metadata,
                               pol_2_total_loss=pol_2_total_loss,
                               device=device)
-    t1 = time()
-    time_train = 1000 * (t1 - t0)
-    print(f"{time_train=}")
 
-    model_parameters = dict(model.named_parameters())
-    # parameter_names, parameter_sizes = get_param_names_and_sizes(model_parameters)
+    param_df = model.get_param_df()
+    fisher_information_matrix = get_fisher_information_matrix(model=model,
+                                                              pol_2_total_loss=pol_2_total_loss,
+                                                              gene_data=gene_data,
+                                                              dataset_metadata=dataset_metadata)
 
-    t2 = time()
-
-
-    def loss_by_model_parameters(model_parameters):
-        outputs = functional_call(model, model_parameters, (dataset_metadata.design_matrix,
-                                                            dataset_metadata.log_library_sizes))
-        predicted_log_reads_exon, predicted_reads_intron, phi = outputs
-        return pol_2_total_loss(reads_exon=gene_data.exon_reads,
-                                reads_introns=gene_data.intron_reads,
-                                coverage=gene_data.coverage,
-                                predicted_log_reads_exon=predicted_log_reads_exon,
-                                predicted_reads_intron=predicted_reads_intron,
-                                phi=phi)
-
-
-    hessian_dict = hessian(loss_by_model_parameters)(model_parameters)
-    t3 = time()
-    time_hessian_computation = 1000 * (t3 - t2)
-    print(f"{time_hessian_computation=}")
-
-    H = flatten_hessian_dict(hessian_dict, model_parameters)
-
-    # parameter_data: list[dict] = []
-    # for name, size in zip(parameter_names, parameter_sizes):
-    #     if '.' in name:
-    #         parameter_type = name.split('.', 1)[0]
-    #         intron_name = name.split('.', 1)[1]
-    #     else:
-    #         parameter_type = name.split('.', 1)[0]
-    #         intron_name = None
-
-    #     parameter_value_list = [model_parameters[name].item()] if model_parameters[name].numel() == 1 \
-    #         else model_parameters[name].tolist()
-    #     for feature_index in range(size):
-    #         feature_name = None
-    #         if parameter_type in ('alpha', 'beta', 'gamma'):
-    #             feature_name = feature_names[feature_index]
-    #         parameter_data.append({'parameter_type': parameter_type,
-    #                                'intron_name': intron_name,
-    #                                'feature_name': feature_name,
-    #                                'value': parameter_value_list[feature_index]})
-
-    # df_param = pd.DataFrame(data=parameter_data)
+    param_df = add_wald_test_results(param_df, fisher_information_matrix)

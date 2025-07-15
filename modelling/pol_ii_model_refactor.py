@@ -4,6 +4,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
+EXP_INPUT_CLAMP = 40
+
 
 @dataclass
 class GeneData:
@@ -70,7 +72,7 @@ class Pol2Model(nn.Module):
         # alpha[self.mask_alpha.feature_index] = self.mask_alpha.value
 
         gene_expression_term = design_matrix @ alpha
-        predicted_log_reads_exon = self.intercept_exon + log_library_sizes + gene_expression_term
+        predicted_log_reads_exon = (self.intercept_exon + log_library_sizes + gene_expression_term)
 
         beta = self.beta
         gamma = self.gamma
@@ -83,10 +85,21 @@ class Pol2Model(nn.Module):
 
         intron_gene_expression_term = self.intercept_intron + log_library_sizes.unsqueeze(
             1) + gene_expression_term.unsqueeze(1)
-        reads_intronic_polymerases = torch.exp(intron_gene_expression_term + self.log_phi_zero - speed_term)
-        reads_unspliced_transcripts = torch.exp(intron_gene_expression_term + splicing_term)
+        reads_intronic_polymerases = torch.exp(
+            (intron_gene_expression_term + self.log_phi_zero - speed_term).clamp(max=EXP_INPUT_CLAMP,
+                                                                                 min=-EXP_INPUT_CLAMP))
+        reads_unspliced_transcripts = torch.exp(
+            (intron_gene_expression_term + splicing_term).clamp(max=EXP_INPUT_CLAMP, min=-EXP_INPUT_CLAMP))
         predicted_reads_intron = reads_intronic_polymerases + reads_unspliced_transcripts
 
+        if torch.isnan(predicted_log_reads_exon).any() or torch.isnan(predicted_reads_intron).any():
+            current_params = dict(self.named_parameters())
+            print(f"{current_params=}")
+            assert False, "NaNs in predicted outputs"
+        if torch.isinf(predicted_reads_intron).any():
+            current_params = dict(self.named_parameters())
+            print(f"{current_params=}")
+            assert False, "Infs in predicted_reads_intron"
         return predicted_log_reads_exon, predicted_reads_intron, phi
 
     def get_param_df(self):
@@ -118,7 +131,7 @@ class Pol2Model(nn.Module):
                                            'feature_name': None,
                                            'value': param_value[intron_index].item()})
             else:
-                assert False
+                raise RuntimeError(f"Unexpected parameter name: {param_name}")
         df_param = pd.DataFrame(data=parameter_data)
         return df_param
 
@@ -152,7 +165,8 @@ class Pol2TotalLoss(nn.Module):
                 predicted_log_reads_exon: torch.Tensor,
                 predicted_reads_intron: torch.Tensor,
                 phi: torch.Tensor):
-        loss_exon = self.loss_function_exon(predicted_log_reads_exon, reads_exon)
+        loss_exon = self.loss_function_exon(predicted_log_reads_exon.clamp(max=EXP_INPUT_CLAMP, min=-EXP_INPUT_CLAMP),
+                                            reads_exon)
         loss_intron = self.loss_function_intron(predicted_reads_intron, reads_introns)
         loss_coverage = self.loss_function_coverage(phi, coverage)
 
