@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 import pandas as pd
 import torch
@@ -37,6 +38,18 @@ class DatasetMetadata:
         return self
 
 
+@dataclass
+class ParameterMask:
+    logical_mask: torch.Tensor
+    fixed_value_mask: Optional[torch.Tensor] = None
+
+    def apply(self, param: torch.Tensor) -> torch.Tensor:
+        param_masked = param * self.logical_mask
+        if self.fixed_value_mask is not None:
+            param_masked = param_masked + self.fixed_value_mask
+        return param_masked
+
+
 class Pol2Model(nn.Module):
 
     def __init__(self,
@@ -59,29 +72,59 @@ class Pol2Model(nn.Module):
         self.intercept_intron = nn.Parameter(torch.zeros(num_introns))
         self.log_phi_zero = nn.Parameter(torch.zeros(num_introns))
 
+        self.mask_alpha: Optional[ParameterMask] = None
+        self.mask_beta: Optional[ParameterMask] = None
+        self.mask_gamma: Optional[ParameterMask] = None
+
     def initialize_intercepts(self, gene_data: GeneData, library_sizes: torch.Tensor) -> None:
         with torch.no_grad():
             self.intercept_exon.data = torch.log(gene_data.exon_reads.mean() / library_sizes.mean())
             self.intercept_intron.data = torch.log(gene_data.intron_reads.mean(axis=0) / library_sizes.mean())
 
+    def set_parameter_mask(self,
+                           param_name: str,
+                           feature_name: str,
+                           intron_name: Optional[str] = None,
+                           value=0.0) -> None:
+        if param_name == 'alpha':
+            logical_mask = torch.ones_like(self.alpha)
+            feature_index = self.feature_names.index(feature_name)
+            logical_mask[feature_index] = 0.0
+            self.mask_alpha = ParameterMask(logical_mask=logical_mask)
+            if value != 0:
+                self.mask_alpha.fixed_value_mask = torch.zeros_like(self.alpha)
+                self.mask_alpha.fixed_value_mask[feature_index] = value
+        elif param_name in ('beta', 'gamma'):
+            logical_mask = torch.ones_like(self.beta)  # beta and gamma have the same shape
+            feature_index = self.feature_names.index(feature_name)
+            intron_index = self.intron_names.index(intron_name)
+            logical_mask[feature_index, intron_index] = 0.0
+            fixed_value_mask = None
+            if value != 0:
+                fixed_value_mask = torch.zeros_like(self.beta)
+                fixed_value_mask[feature_index, intron_index] = value
+            parameter_mask = ParameterMask(logical_mask=logical_mask,
+                                           fixed_value_mask=fixed_value_mask)
+            if param_name == 'beta':
+                self.mask_beta = parameter_mask
+            elif param_name == 'gamma':
+                self.mask_gamma = parameter_mask
+
+        else:
+            raise RuntimeError(f"Unexpected parameter name: {param_name}")
+
     def forward(self, design_matrix: torch.Tensor, log_library_sizes: torch.Tensor):
-        alpha = self.alpha
-        # if self.mask_alpha is not None:
-        #     pass
-        # alpha = self.alpha.clone()
-        # alpha[self.mask_alpha.feature_index] = self.mask_alpha.value
+        alpha = self.alpha if self.mask_alpha is None else self.mask_alpha.apply(self.alpha)
+        beta = self.beta if self.mask_beta is None else self.mask_beta.apply(self.beta)
+        gamma = self.gamma if self.mask_gamma is None else self.mask_gamma.apply(self.gamma)
 
         gene_expression_term = design_matrix @ alpha
         predicted_log_reads_exon = (self.intercept_exon + log_library_sizes + gene_expression_term)
 
-        beta = self.beta
-        gamma = self.gamma
-        # TODO: handle masking for LRT
-
         speed_term = design_matrix @ beta
         splicing_term = design_matrix @ gamma
 
-        phi = torch.sigmoid(self.log_phi_zero - speed_term - splicing_term)  # (num_samples, num_introns)
+        phi = torch.sigmoid(self.log_phi_zero - speed_term - splicing_term)
 
         intron_gene_expression_term = self.intercept_intron + log_library_sizes.unsqueeze(
             1) + gene_expression_term.unsqueeze(1)
@@ -92,17 +135,9 @@ class Pol2Model(nn.Module):
             (intron_gene_expression_term + splicing_term).clamp(max=EXP_INPUT_CLAMP, min=-EXP_INPUT_CLAMP))
         predicted_reads_intron = reads_intronic_polymerases + reads_unspliced_transcripts
 
-        if torch.isnan(predicted_log_reads_exon).any() or torch.isnan(predicted_reads_intron).any():
-            current_params = dict(self.named_parameters())
-            print(f"{current_params=}")
-            assert False, "NaNs in predicted outputs"
-        if torch.isinf(predicted_reads_intron).any():
-            current_params = dict(self.named_parameters())
-            print(f"{current_params=}")
-            assert False, "Infs in predicted_reads_intron"
         return predicted_log_reads_exon, predicted_reads_intron, phi
 
-    def get_param_df(self):
+    def get_param_df(self) -> pd.DataFrame:
         model_parameters = dict(self.named_parameters())
         parameter_data: list[dict] = []
         for param_name, param_value in model_parameters.items():
