@@ -5,6 +5,8 @@ from torch import nn
 from torch import optim
 import pandas as pd
 import numpy as np
+from typing import Optional
+from dataclasses import dataclass
 
 from tqdm import trange, tqdm
 from dataclasses import dataclass
@@ -17,6 +19,13 @@ import scipy
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+@dataclass
+class TrainingResults:    
+    final_loss: float
+    converged: bool
+    num_epochs: int
+    losses: list[float]
+
 
 def train_model(gene_data: GeneData,
                 dataset_metadata: DatasetMetadata,
@@ -24,10 +33,12 @@ def train_model(gene_data: GeneData,
                 device: str,
                 max_epochs=100,
                 max_patience=5,
-                loss_change_tolerance=1e-6
-                ) -> tuple[Pol2Model, float]:
-    model = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)
-    model.initialize_intercepts(gene_data, library_sizes)
+                loss_change_tolerance=1e-6,
+                model: Optional[Pol2Model] = None
+                ) -> tuple[Pol2Model, TrainingResults]:
+    if model is None:
+        model = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)
+        model.initialize_intercepts(gene_data, library_sizes)
 
     optimizer = optim.LBFGS(model.parameters(),
                             lr=1.0,
@@ -47,27 +58,35 @@ def train_model(gene_data: GeneData,
                                 predicted_log_reads_exon=predicted_log_reads_exon,
                                 predicted_reads_intron=predicted_reads_intron,
                                 phi=phi)
-        loss.backward()
+        loss.backward()        
         return loss
 
     previous_loss = None
     patience_counter = 0
-
+    
+    converged = False
+    
+    losses: list[float] = []
     for epoch in range(max_epochs):
         loss = optimizer.step(closure).item()
-
+        losses.append(loss)
         if previous_loss is not None:
             relative_loss_change = abs(loss - previous_loss) / (abs(previous_loss) + 1e-10)
             if relative_loss_change < loss_change_tolerance:
                 patience_counter += 1
                 if patience_counter >= max_patience:
+                    converged = True
                     break
             else:
                 patience_counter = 0
 
         previous_loss = loss
+    training_results = TrainingResults(final_loss=loss,
+                                      converged=converged,
+                                      num_epochs=epoch+1,
+                                      losses=losses)
 
-    return model, loss
+    return model, training_results
 
 
 def flatten_hessian_dict(hessian_dict, model_parameters):
@@ -149,18 +168,20 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
 def get_results_for_gene(gene_data: GeneData,
                          dataset_metadata: DatasetMetadata,
                          device='cpu',
-                         perform_wald_test=True) -> pd.DataFrame:
+                         perform_wald_test=True,
+                         perform_lrt=False) -> pd.DataFrame:
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
     pol_2_total_loss = Pol2TotalLoss().to(device)
 
-    model, loss = train_model(gene_data=gene_data,
+    model, training_results = train_model(gene_data=gene_data,
                               dataset_metadata=dataset_metadata,
                               pol_2_total_loss=pol_2_total_loss,
                               device=device)
 
     param_df = model.get_param_df()
     param_df['gene_name'] = gene_data.gene_name
+    
     if perform_wald_test:
         fisher_information_matrix = get_fisher_information_matrix(model=model,
                                                                   pol_2_total_loss=pol_2_total_loss,
@@ -168,6 +189,39 @@ def get_results_for_gene(gene_data: GeneData,
                                                                   dataset_metadata=dataset_metadata)
 
         param_df = add_wald_test_results(param_df, fisher_information_matrix)
+    
+    if perform_lrt:
+        loss_unrestricted = training_results.final_loss
+        
+        loss_differences: list[Optional[float]] = []
+        
+        for _, row in tqdm(param_df.iterrows()):        
+            if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
+                loss_differences.append(None)
+            else:
+                model_restricted = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)      
+                model_restricted.load_state_dict(model.state_dict())
+                
+                model_restricted.set_parameter_mask(param_name=row['parameter_type'],
+                                         feature_name=row['feature_name'],
+                                         intron_name = None if row['parameter_type']=='alpha' else row['intron_name'],
+                                         value=0.0)
+                model_restricted, training_results = train_model(gene_data=gene_data,
+                                          dataset_metadata=dataset_metadata,
+                                          pol_2_total_loss=pol_2_total_loss,
+                                          device=device,
+                                          model=model_restricted)
+                if training_results.converged:
+                    loss_differences.append(training_results.final_loss - loss_unrestricted)
+                else:
+                    loss_differences.append(None)      
+                    
+                # if training_results.final_loss > 1e6:
+                #     assert False, 'Model diverged'
+                #     break
+                
+        param_df['loss_differences'] = loss_differences
+        param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
     return param_df
 
 
@@ -196,27 +250,62 @@ if __name__ == "__main__":
 
     device = 'cpu'
     # %%
-    # all_results = []
-    # for gene_data in tqdm(gene_data_list):
-    #     all_results.append(get_results_for_gene(gene_data=gene_data, dataset_metadata=dataset_metadata))
+    all_results = []
+    for gene_data in tqdm(gene_data_list):
+        all_results.append(get_results_for_gene(gene_data=gene_data, dataset_metadata=dataset_metadata))
 
     # %%
 
-    gene_data = gene_data_list[0]
-    gene_data = gene_data.to(device)
-    dataset_metadata = dataset_metadata.to(device)
+    # gene_data = gene_data_list[0]
+    # gene_data = gene_data.to(device)
+    # dataset_metadata = dataset_metadata.to(device)
 
-    pol_2_total_loss = Pol2TotalLoss().to(device)
+    # pol_2_total_loss = Pol2TotalLoss().to(device)
 
-    model, loss = train_model(gene_data=gene_data,
-                              dataset_metadata=dataset_metadata,
-                              pol_2_total_loss=pol_2_total_loss,
-                              device=device)
+    # model, training_results = train_model(gene_data=gene_data,
+    #                           dataset_metadata=dataset_metadata,
+    #                           pol_2_total_loss=pol_2_total_loss,
+    #                           device=device)
 
-    param_df = model.get_param_df()
-    fisher_information_matrix = get_fisher_information_matrix(model=model,
-                                                              pol_2_total_loss=pol_2_total_loss,
-                                                              gene_data=gene_data,
-                                                              dataset_metadata=dataset_metadata)
+    # param_df = model.get_param_df()
+    # fisher_information_matrix = get_fisher_information_matrix(model=model,
+    #                                                           pol_2_total_loss=pol_2_total_loss,
+    #                                                           gene_data=gene_data,
+    #                                                           dataset_metadata=dataset_metadata)
 
-    param_df = add_wald_test_results(param_df, fisher_information_matrix)
+    # param_df = add_wald_test_results(param_df, fisher_information_matrix)
+    
+    # # Logic for LRT
+    
+    # loss_unrestricted = training_results.final_loss
+    
+    # loss_differences: list[Optional[float]] = []
+    # for _, row in tqdm(param_df.iterrows()):        
+    #     if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
+    #         loss_differences.append(None)
+    #     else:
+    #         model_restricted = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)      
+    #         model_restricted.load_state_dict(model.state_dict())
+            
+    #         model_restricted.set_parameter_mask(param_name=row['parameter_type'],
+    #                                  feature_name=row['feature_name'],
+    #                                  intron_name = None if row['parameter_type']=='alpha' else row['intron_name'],
+    #                                  value=0.0)
+    #         model_restricted, training_results = train_model(gene_data=gene_data,
+    #                                   dataset_metadata=dataset_metadata,
+    #                                   pol_2_total_loss=pol_2_total_loss,
+    #                                   device=device,
+    #                                   model=model_restricted)
+    #         if training_results.converged:
+    #             loss_differences.append(training_results.final_loss - loss_unrestricted)
+    #         else:
+    #             loss_differences.append(None)      
+                
+    #         if training_results.final_loss > 1e6:
+    #             assert False, 'Model diverged'
+    #             break
+            
+    # param_df['loss_differences'] = loss_differences
+    # param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
+    
+    
