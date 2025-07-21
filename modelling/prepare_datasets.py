@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from pol_ii_model import GeneData, GeneDataWithSolution
+from pol_ii_model_old import GeneData, GeneDataWithSolution
 from read_location_model import estimate_phi
 
 

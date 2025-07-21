@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 import pickle
 from tqdm import tqdm
 from pathlib import Path
-from pol_ii_model import Pol2Model, CoverageLoss, GeneData, GeneDataWithSolution
+from pol_ii_model_old import Pol2Model, CoverageLoss, GeneData, GeneDataWithSolution
 import math
 
 project_path = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants')

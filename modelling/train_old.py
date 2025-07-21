@@ -14,7 +14,7 @@ from tqdm import trange
 from scipy.stats import chi2
 
 from typing import Optional
-from pol_ii_model import Pol2Model, GeneData, Pol2TotalLoss, ParameterMask
+from pol_ii_model_old import Pol2Model, GeneData, Pol2TotalLoss, ParameterMask
 from read_location_model import estimate_phi
 
 HessianDict = dict[str, dict[str, torch.Tensor]]  # structure outputed by Pytorch hessian() function

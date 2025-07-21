@@ -1,42 +1,56 @@
 from dataclasses import dataclass
-from typing import Optional, NamedTuple
+from typing import Optional
 
+import pandas as pd
 import torch
 import torch.nn as nn
+
+EXP_INPUT_CLAMP = 40
 
 
 @dataclass
 class GeneData:
-    exon_reads: torch.Tensor
+    gene_name: str
     intron_names: list[str]
-    intron_reads: dict[str, torch.Tensor]
-    coverage_density: dict[str, torch.Tensor]
+    exon_reads: torch.Tensor
+    intron_reads: torch.Tensor
+    coverage: torch.Tensor
 
     def to(self, device):
         self.exon_reads = self.exon_reads.to(device)
-        self.intron_reads = {key: value.to(device) for key, value in self.intron_reads.items()}
-        self.coverage_density = {key: value.to(device) for key, value in self.coverage_density.items()}
+        self.intron_reads = self.intron_reads.to(device)
+        self.coverage = self.coverage.to(device)
         return self
 
 
 @dataclass
-class GeneDataWithSolution:
-    gene_data: GeneData
-    mu_1: float
-    mu_2: float
-    nu_1: dict[str, float]
-    nu_2: dict[str, float]
-    phi_1: dict[str, float]
-    phi_2: dict[str, float]
+class DatasetMetadata:
+    design_matrix: torch.Tensor
+    library_sizes: torch.Tensor
+    log_library_sizes: torch.Tensor
+    feature_names: list[str]
+    num_coverage_bins: int = 100
+
+    def to(self, device):
+        self.design_matrix = self.design_matrix.to(device)
+        self.library_sizes = self.library_sizes.to(device)
+        self.log_library_sizes = self.log_library_sizes.to(device)
+        return self
 
 
-class ParameterMask(NamedTuple):
-    feature_index: int
-    value: float
-    intron_name: Optional[str] = None
+@dataclass
+class ParameterMask:
+    logical_mask: torch.Tensor
+    fixed_value_mask: Optional[torch.Tensor] = None
+
+    def apply(self, param: torch.Tensor) -> torch.Tensor:
+        param_masked = param * self.logical_mask
+        if self.fixed_value_mask is not None:
+            param_masked = param_masked + self.fixed_value_mask
+        return param_masked
 
 
-class Pol2ModelOptimized(nn.Module):
+class Pol2Model(nn.Module):
 
     def __init__(self,
                  feature_names: list[str],
@@ -58,117 +72,106 @@ class Pol2ModelOptimized(nn.Module):
         self.intercept_intron = nn.Parameter(torch.zeros(num_introns))
         self.log_phi_zero = nn.Parameter(torch.zeros(num_introns))
 
-        self.mask_alpha = None
-        self.mask_beta = None
-        self.mask_gamma = None
+        self.mask_alpha: Optional[ParameterMask] = None
+        self.mask_beta: Optional[ParameterMask] = None
+        self.mask_gamma: Optional[ParameterMask] = None
 
     def initialize_intercepts(self, gene_data: GeneData, library_sizes: torch.Tensor) -> None:
         with torch.no_grad():
-            device = self.intercept_exon.device  # use model’s parameter device
-            exon_reads = gene_data.exon_reads.to(device)
-            library_sizes = library_sizes.to(device)
-            self.intercept_exon.data = torch.log(exon_reads.mean() / library_sizes.mean())
-            for i, intron_name in enumerate(self.intron_names):
-                intron_reads = gene_data.intron_reads[intron_name].to(device)
-                mean_intron_value = intron_reads.mean() / library_sizes.mean()
-                self.intercept_intron.data[i] = torch.log(mean_intron_value)
+            intercept_exon_scalar = torch.log(gene_data.exon_reads.mean() / library_sizes.mean())
+            self.intercept_exon.data[:] = intercept_exon_scalar  # preserve shape [1]
 
-    def forward(self, X: torch.Tensor, log_library_sizes: torch.Tensor):
-        alpha = self.alpha
-        if self.mask_alpha is not None:
-            pass
-            # alpha = self.alpha.clone()
-            # alpha[self.mask_alpha.feature_index] = self.mask_alpha.value
+            intercept_intron_vector = torch.log(gene_data.intron_reads.mean(axis=0) / library_sizes.mean())
+            self.intercept_intron.data.copy_(intercept_intron_vector)
 
-        gene_expression_term = X @ alpha
-        predicted_log_reads_exon = self.intercept_exon + log_library_sizes + gene_expression_term
+    def set_parameter_mask(self,
+                           param_name: str,
+                           feature_name: str,
+                           intron_name: Optional[str] = None,
+                           value=0.0) -> None:
+        if param_name == 'alpha':
+            logical_mask = torch.ones_like(self.alpha)
+            feature_index = self.feature_names.index(feature_name)
+            logical_mask[feature_index] = 0.0
+            self.mask_alpha = ParameterMask(logical_mask=logical_mask)
+            if value != 0:
+                self.mask_alpha.fixed_value_mask = torch.zeros_like(self.alpha)
+                self.mask_alpha.fixed_value_mask[feature_index] = value
+        elif param_name in ('beta', 'gamma'):
+            logical_mask = torch.ones_like(self.beta)  # beta and gamma have the same shape
+            feature_index = self.feature_names.index(feature_name)
+            intron_index = self.intron_names.index(intron_name)
+            logical_mask[feature_index, intron_index] = 0.0
+            fixed_value_mask = None
+            if value != 0:
+                fixed_value_mask = torch.zeros_like(self.beta)
+                fixed_value_mask[feature_index, intron_index] = value
+            parameter_mask = ParameterMask(logical_mask=logical_mask,
+                                           fixed_value_mask=fixed_value_mask)
+            if param_name == 'beta':
+                self.mask_beta = parameter_mask
+            elif param_name == 'gamma':
+                self.mask_gamma = parameter_mask
 
-        beta = self.beta
-        gamma = self.gamma
-        # TODO: handle masking for LRT
+        else:
+            raise RuntimeError(f"Unexpected parameter name: {param_name}")
 
-        speed_term = X @ beta
-        splicing_term = X @ gamma
+    def forward(self, design_matrix: torch.Tensor, log_library_sizes: torch.Tensor):
+        alpha = self.alpha if self.mask_alpha is None else self.mask_alpha.apply(self.alpha)
+        beta = self.beta if self.mask_beta is None else self.mask_beta.apply(self.beta)
+        gamma = self.gamma if self.mask_gamma is None else self.mask_gamma.apply(self.gamma)
 
-        phi = torch.sigmoid(self.log_phi_zero - speed_term - splicing_term)  # (num_samples, num_introns)
+        gene_expression_term = design_matrix @ alpha
+        predicted_log_reads_exon = (self.intercept_exon + log_library_sizes + gene_expression_term)
+
+        speed_term = design_matrix @ beta
+        splicing_term = design_matrix @ gamma
+
+        phi = torch.sigmoid(self.log_phi_zero - speed_term - splicing_term)
 
         intron_gene_expression_term = self.intercept_intron + log_library_sizes.unsqueeze(
             1) + gene_expression_term.unsqueeze(1)
-        reads_intronic_polymerases = torch.exp(intron_gene_expression_term + self.log_phi_zero - speed_term)
-        reads_unspliced_transcripts = torch.exp(intron_gene_expression_term + splicing_term)
+        reads_intronic_polymerases = torch.exp(
+            (intron_gene_expression_term + self.log_phi_zero - speed_term).clamp(max=EXP_INPUT_CLAMP,
+                                                                                 min=-EXP_INPUT_CLAMP))
+        reads_unspliced_transcripts = torch.exp(
+            (intron_gene_expression_term + splicing_term).clamp(max=EXP_INPUT_CLAMP, min=-EXP_INPUT_CLAMP))
         predicted_reads_intron = reads_intronic_polymerases + reads_unspliced_transcripts
 
         return predicted_log_reads_exon, predicted_reads_intron, phi
 
-
-class Pol2Model(nn.Module):
-
-    def __init__(self,
-                 num_features: int,
-                 intron_names: list[str],
-                 exon_intercept_init: Optional[float] = None,
-                 intron_intercepts_init: Optional[dict[str, float]] = None,
-                 mask_alpha: Optional[ParameterMask] = None,
-                 mask_beta: Optional[ParameterMask] = None,
-                 mask_gamma: Optional[ParameterMask] = None):
-        super().__init__()
-        self.intron_names = intron_names
-
-        self.alpha = nn.Parameter(torch.zeros(num_features))
-        self.intercept_exon = nn.Parameter(
-            torch.tensor(exon_intercept_init if exon_intercept_init is not None else 0.0))
-
-        self.beta = nn.ParameterDict({
-            intron: nn.Parameter(torch.zeros(num_features))
-            for intron in intron_names})
-        self.gamma = nn.ParameterDict({
-            intron: nn.Parameter(torch.zeros(num_features))
-            for intron in intron_names})
-
-        self.intercept_intron = nn.ParameterDict({
-            intron_name: nn.Parameter(
-                torch.tensor(intron_intercepts_init[intron_name] if intron_intercepts_init is not None else 0.0))
-            for intron_name in intron_names})
-        self.log_phi_zero = nn.ParameterDict({
-            intron: nn.Parameter(torch.tensor(0.0))
-            for intron in intron_names})
-
-        self.mask_alpha = mask_alpha
-        self.mask_beta = mask_beta
-        self.mask_gamma = mask_gamma
-
-    def forward(self, X: torch.Tensor, log_library_sizes: torch.Tensor):
-        alpha = self.alpha
-        if self.mask_alpha is not None:
-            alpha = self.alpha.clone()
-            alpha[self.mask_alpha.feature_index] = self.mask_alpha.value
-        gene_expression_term = X @ alpha
-        predicted_log_reads_exon = self.intercept_exon + log_library_sizes + gene_expression_term
-
-        predicted_reads_intron = {}
-        phi = {}
-        for intron_name in self.intron_names:
-            beta = self.beta[intron_name]
-            if self.mask_beta is not None and self.mask_beta.intron_name == intron_name:
-                beta = self.beta[intron_name].clone()
-                beta[self.mask_beta.feature_index] = self.mask_beta.value
-
-            gamma = self.gamma[intron_name]
-            if self.mask_gamma is not None and self.mask_gamma.intron_name == intron_name:
-                gamma = self.gamma[intron_name].clone()
-                gamma[self.mask_gamma.feature_index] = self.mask_gamma.value
-
-            speed_term = X @ beta
-            splicing_term = X @ gamma
-
-            phi[intron_name] = torch.sigmoid(self.log_phi_zero[intron_name] - speed_term - splicing_term)
-
-            predicted_reads_intron[intron_name] = torch.exp(
-                self.intercept_intron[intron_name] + self.log_phi_zero[
-                    intron_name] + log_library_sizes + gene_expression_term - speed_term) + torch.exp(
-                self.intercept_intron[intron_name] + log_library_sizes + gene_expression_term + splicing_term)
-
-        return predicted_log_reads_exon, predicted_reads_intron, phi
+    def get_param_df(self) -> pd.DataFrame:
+        model_parameters = dict(self.named_parameters())
+        parameter_data: list[dict] = []
+        for param_name, param_value in model_parameters.items():
+            if param_name == 'intercept_exon':
+                parameter_data.append({'parameter_type': param_name,
+                                       'intron_name': None,
+                                       'feature_name': None,
+                                       'value': param_value.item()})
+            elif param_name == 'alpha':
+                for feature_index, feature_name in enumerate(self.feature_names):
+                    parameter_data.append({'parameter_type': param_name,
+                                           'intron_name': None,
+                                           'feature_name': feature_name,
+                                           'value': param_value[feature_index].item()})
+            elif param_name in ('beta', 'gamma'):
+                for feature_index, feature_name in enumerate(self.feature_names):
+                    for intron_index, intron_name in enumerate(self.intron_names):
+                        parameter_data.append({'parameter_type': param_name,
+                                               'intron_name': intron_name,
+                                               'feature_name': feature_name,
+                                               'value': param_value[feature_index, intron_index].item()})
+            elif param_name in ('intercept_intron', 'log_phi_zero'):
+                for intron_index, intron_name in enumerate(self.intron_names):
+                    parameter_data.append({'parameter_type': param_name,
+                                           'intron_name': intron_name,
+                                           'feature_name': None,
+                                           'value': param_value[intron_index].item()})
+            else:
+                raise RuntimeError(f"Unexpected parameter name: {param_name}")
+        df_param = pd.DataFrame(data=parameter_data)
+        return df_param
 
 
 class CoverageLoss(nn.Module):
@@ -177,12 +180,13 @@ class CoverageLoss(nn.Module):
         super().__init__()
         locations = torch.linspace(start=1 / (2 * num_position_coverage),
                                    end=1 - 1 / (2 * num_position_coverage),
-                                   steps=num_position_coverage).unsqueeze(0)
-        self.register_buffer("locations", locations)
+                                   steps=num_position_coverage)
+        location_term = 1 - 2 * locations
+        self.register_buffer("location_term", location_term)
 
-    def forward(self, phi, num_intronic_reads, coverage):
-        loss_per_location = -torch.log(1 + phi.unsqueeze(1) - 2 * phi.unsqueeze(1) * self.locations)
-        return torch.sum(loss_per_location * coverage * num_intronic_reads.unsqueeze(1))
+    def forward(self, phi, coverage):
+        loss_per_location = -torch.log(1 + phi.unsqueeze(2) * self.location_term)
+        return torch.sum(loss_per_location * coverage)
 
 
 class Pol2TotalLoss(nn.Module):
@@ -192,45 +196,6 @@ class Pol2TotalLoss(nn.Module):
         self.loss_function_intron = nn.PoissonNLLLoss(log_input=False, full=True, reduction='sum')
         self.loss_function_coverage = CoverageLoss(num_position_coverage=num_position_coverage)
 
-    def forward(self, gene_data: GeneData,
-                predicted_log_reads_exon: torch.Tensor,
-                predicted_reads_intron: dict[str, torch.Tensor],
-                phi: dict[str, torch.Tensor]):
-        loss_exon = self.loss_function_exon(predicted_log_reads_exon, gene_data.exon_reads)
-
-        loss_intron = sum(self.loss_function_intron(predicted_reads_intron[name], gene_data.intron_reads[name])
-                          for name in gene_data.intron_names)
-
-        loss_coverage = sum(self.loss_function_coverage(phi[name],
-                                                        gene_data.intron_reads[name],
-                                                        gene_data.coverage_density[name])
-                            for name in gene_data.intron_names)
-
-        total_loss = loss_exon + loss_intron + loss_coverage
-        return total_loss
-
-
-class CoverageLossOptimized(nn.Module):
-
-    def __init__(self, num_position_coverage: int = 100):
-        super().__init__()
-        locations = torch.linspace(start=1 / (2 * num_position_coverage),
-                                   end=1 - 1 / (2 * num_position_coverage),
-                                   steps=num_position_coverage)
-        self.register_buffer("locations", locations)
-
-    def forward(self, phi, coverage):
-        loss_per_location = -torch.log(1 + phi.unsqueeze(2) * (1 - 2 * self.locations))
-        return torch.sum(loss_per_location * coverage)
-
-
-class Pol2TotalLossOptimized(nn.Module):
-    def __init__(self, num_position_coverage: int = 100):
-        super().__init__()
-        self.loss_function_exon = nn.PoissonNLLLoss(log_input=True, full=True, reduction='sum')
-        self.loss_function_intron = nn.PoissonNLLLoss(log_input=False, full=True, reduction='sum')
-        self.loss_function_coverage = CoverageLossOptimized(num_position_coverage=num_position_coverage)
-
     def forward(self,
                 reads_exon: torch.Tensor,
                 reads_introns: torch.Tensor,
@@ -238,10 +203,9 @@ class Pol2TotalLossOptimized(nn.Module):
                 predicted_log_reads_exon: torch.Tensor,
                 predicted_reads_intron: torch.Tensor,
                 phi: torch.Tensor):
-        loss_exon = self.loss_function_exon(predicted_log_reads_exon, reads_exon)
-
+        loss_exon = self.loss_function_exon(predicted_log_reads_exon.clamp(max=EXP_INPUT_CLAMP, min=-EXP_INPUT_CLAMP),
+                                            reads_exon)
         loss_intron = self.loss_function_intron(predicted_reads_intron, reads_introns)
-
         loss_coverage = self.loss_function_coverage(phi, coverage)
 
         total_loss = loss_exon + loss_intron + loss_coverage
