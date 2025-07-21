@@ -10,7 +10,7 @@ import torch
 from scipy import stats
 from torch import optim
 from torch.func import functional_call, hessian
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 from pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 
@@ -18,9 +18,10 @@ from pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 @dataclass
 class TrainingResults:
     final_loss: float
-    converged: bool
+    converged_within_max_epochs: bool
     num_epochs: int
     losses: list[float]
+    gradient_norms: list[float]
 
 
 def train_model(gene_data: GeneData,
@@ -38,7 +39,7 @@ def train_model(gene_data: GeneData,
 
     optimizer = optim.LBFGS(model.parameters(),
                             lr=1.0,
-                            max_iter=100,
+                            max_iter=50,
                             tolerance_change=1e-09,
                             tolerance_grad=1e-07,
                             history_size=100,
@@ -46,15 +47,19 @@ def train_model(gene_data: GeneData,
 
     def closure():
         optimizer.zero_grad()
-        predicted_log_reads_exon, predicted_reads_intron, phi = model(dataset_metadata.design_matrix,
+        predicted_reads_exon, predicted_reads_intron, phi = model(dataset_metadata.design_matrix,
                                                                       dataset_metadata.log_library_sizes)
         loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                 reads_introns=gene_data.intron_reads,
                                 coverage=gene_data.coverage,
-                                predicted_log_reads_exon=predicted_log_reads_exon,
+                                predicted_reads_exon=predicted_reads_exon,
                                 predicted_reads_intron=predicted_reads_intron,
                                 phi=phi)
         loss.backward()
+        
+        # grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1e20)
+        # closure.grad_norm = grad_norm  # save to function attribute
+    
         return loss
 
     previous_loss = None
@@ -63,9 +68,14 @@ def train_model(gene_data: GeneData,
     converged = False
 
     losses: list[float] = []
-    for epoch in range(max_epochs):
+    gradient_norms: list[float] = []
+    for epoch in trange(max_epochs):
         loss = optimizer.step(closure).item()
+        # grad_norm = closure.grad_norm  # retrieve from closure
+
         losses.append(loss)
+        # gradient_norms.append(grad_norm)
+
         if previous_loss is not None:
             relative_loss_change = abs(loss - previous_loss) / (abs(previous_loss) + 1e-10)
             if relative_loss_change < loss_change_tolerance:
@@ -78,9 +88,10 @@ def train_model(gene_data: GeneData,
 
         previous_loss = loss
     training_results = TrainingResults(final_loss=loss,
-                                       converged=converged,
+                                       converged_within_max_epochs=converged,
                                        num_epochs=epoch + 1,
-                                       losses=losses)
+                                       losses=losses,
+                                       gradient_norms=gradient_norms)
 
     return model, training_results
 
@@ -114,11 +125,11 @@ def get_fisher_information_matrix(model: Pol2Model,
     def loss_by_model_parameters(model_parameters):
         outputs = functional_call(model, model_parameters, (dataset_metadata.design_matrix,
                                                             dataset_metadata.log_library_sizes))
-        predicted_log_reads_exon, predicted_reads_intron, phi = outputs
+        predicted_reads_exon, predicted_reads_intron, phi = outputs
         return pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                 reads_introns=gene_data.intron_reads,
                                 coverage=gene_data.coverage,
-                                predicted_log_reads_exon=predicted_log_reads_exon,
+                                predicted_reads_exon=predicted_reads_exon,
                                 predicted_reads_intron=predicted_reads_intron,
                                 phi=phi)
 
@@ -209,7 +220,7 @@ def get_results_for_gene(gene_data: GeneData,
                                                                  pol_2_total_loss=pol_2_total_loss,
                                                                  device=device,
                                                                  model=model_restricted)
-                if training_results.converged:
+                if training_results.converged_within_max_epochs:
                     loss_differences.append(training_results.final_loss - loss_unrestricted)
                 else:
                     loss_differences.append(None)
@@ -251,12 +262,16 @@ if __name__ == "__main__":
     device = 'cpu'
     # %%
     # all_results = []
-    # for gene_data in tqdm(gene_data_list):
-    #     all_results.append(get_results_for_gene(gene_data=gene_data, dataset_metadata=dataset_metadata))
+    # for gene_data in tqdm(gene_data_list[:10]):
+    #     all_results.append(get_results_for_gene(gene_data=gene_data, 
+    #                                             dataset_metadata=dataset_metadata,
+    #                                             perform_lrt=False))
+    # df_all = pd.concat(all_results)
 
     # %%
+    
 
-    gene_data = gene_data_list[0]
+    gene_data = [x for x in gene_data_list if x.gene_name == 'FBgn0000036'][0]
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
 
@@ -267,7 +282,15 @@ if __name__ == "__main__":
                                           pol_2_total_loss=pol_2_total_loss,
                                           device=device)
 
+    print(f"{training_results=}")
+    
+
     param_df = model.get_param_df()
+    
+    import sys
+
+    sys.exit(0)
+    
     fisher_information_matrix = get_fisher_information_matrix(model=model,
                                                               pol_2_total_loss=pol_2_total_loss,
                                                               gene_data=gene_data,
@@ -297,7 +320,7 @@ if __name__ == "__main__":
                                                              pol_2_total_loss=pol_2_total_loss,
                                                              device=device,
                                                              model=model_restricted)
-            if training_results.converged:
+            if training_results.converged_within_max_epochs:
                 loss_differences.append(training_results.final_loss - loss_unrestricted)
             else:
                 loss_differences.append(None)

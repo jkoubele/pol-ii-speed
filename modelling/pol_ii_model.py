@@ -1,11 +1,22 @@
 from dataclasses import dataclass
 from typing import Optional
+import math
 
 import pandas as pd
 import torch
 import torch.nn as nn
 
 EXP_INPUT_CLAMP = 40
+
+
+def safe_exp(x: torch.Tensor, output_threshold: float = 1e9) -> torch.Tensor:
+    output_threshold_tensor = torch.tensor(output_threshold, dtype=x.dtype, device=x.device)
+    input_threshold = torch.log(output_threshold_tensor)
+    return torch.where(
+        x <= input_threshold,
+        torch.exp(x),
+        output_threshold_tensor + output_threshold_tensor * (x - input_threshold)
+    )
 
 
 @dataclass
@@ -131,14 +142,26 @@ class Pol2Model(nn.Module):
 
         intron_gene_expression_term = self.intercept_intron + log_library_sizes.unsqueeze(
             1) + gene_expression_term.unsqueeze(1)
-        reads_intronic_polymerases = torch.exp(
-            (intron_gene_expression_term + self.log_phi_zero - speed_term).clamp(max=EXP_INPUT_CLAMP,
-                                                                                 min=-EXP_INPUT_CLAMP))
-        reads_unspliced_transcripts = torch.exp(
-            (intron_gene_expression_term + splicing_term).clamp(max=EXP_INPUT_CLAMP, min=-EXP_INPUT_CLAMP))
+        reads_intronic_polymerases = safe_exp(intron_gene_expression_term + self.log_phi_zero - speed_term)
+        reads_unspliced_transcripts = safe_exp(intron_gene_expression_term + splicing_term)
         predicted_reads_intron = reads_intronic_polymerases + reads_unspliced_transcripts
+        
+        # Check for NaNs and Infs
+        assert torch.all(torch.isfinite(predicted_log_reads_exon)), f"NaN or Inf in predicted_log_reads_exon: {predicted_log_reads_exon=}"
+        assert torch.all(torch.isfinite(predicted_reads_intron)), "NaN or Inf in predicted_reads_intron"
+        assert torch.all(torch.isfinite(phi)), "NaN or Inf in phi"
+        
+        # Check for suspiciously large values
+        assert torch.all(predicted_log_reads_exon < 100), "Suspiciously large log exon prediction"
+        assert torch.all(predicted_reads_intron < 1e12), "Suspiciously large intron prediction"
+        
+        # Check for negative predictions
+        assert torch.all(predicted_reads_intron >= 0), "Negative predicted intron reads"
+        assert torch.all(safe_exp(predicted_log_reads_exon) >= 0), "Negative predicted exon reads (after exp)"
 
-        return predicted_log_reads_exon, predicted_reads_intron, phi
+        
+
+        return safe_exp(predicted_log_reads_exon), predicted_reads_intron, phi
 
     def get_param_df(self) -> pd.DataFrame:
         model_parameters = dict(self.named_parameters())
@@ -192,7 +215,7 @@ class CoverageLoss(nn.Module):
 class Pol2TotalLoss(nn.Module):
     def __init__(self, num_position_coverage: int = 100):
         super().__init__()
-        self.loss_function_exon = nn.PoissonNLLLoss(log_input=True, full=True, reduction='sum')
+        self.loss_function_exon = nn.PoissonNLLLoss(log_input=False, full=True, reduction='sum')
         self.loss_function_intron = nn.PoissonNLLLoss(log_input=False, full=True, reduction='sum')
         self.loss_function_coverage = CoverageLoss(num_position_coverage=num_position_coverage)
 
@@ -200,10 +223,10 @@ class Pol2TotalLoss(nn.Module):
                 reads_exon: torch.Tensor,
                 reads_introns: torch.Tensor,
                 coverage: torch.Tensor,
-                predicted_log_reads_exon: torch.Tensor,
+                predicted_reads_exon: torch.Tensor,
                 predicted_reads_intron: torch.Tensor,
                 phi: torch.Tensor):
-        loss_exon = self.loss_function_exon(predicted_log_reads_exon.clamp(max=EXP_INPUT_CLAMP, min=-EXP_INPUT_CLAMP),
+        loss_exon = self.loss_function_exon(predicted_reads_exon,
                                             reads_exon)
         loss_intron = self.loss_function_intron(predicted_reads_intron, reads_introns)
         loss_coverage = self.loss_function_coverage(phi, coverage)
