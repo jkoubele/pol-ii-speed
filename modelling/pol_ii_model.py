@@ -12,9 +12,9 @@ EXP_INPUT_CLAMP = 40
 class GeneData:
     gene_name: str
     intron_names: list[str]
-    exon_reads: torch.Tensor
-    intron_reads: torch.Tensor
-    coverage: torch.Tensor
+    exon_reads: torch.Tensor  # shape (num_samples,)
+    intron_reads: torch.Tensor  # shape (num_samples, num_introns)
+    coverage: torch.Tensor  # shape (num_samples, num_introns, num_coverage_bins)
 
     def to(self, device):
         self.exon_reads = self.exon_reads.to(device)

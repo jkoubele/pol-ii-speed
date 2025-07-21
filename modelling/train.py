@@ -218,18 +218,20 @@ def get_results_for_gene(gene_data: GeneData,
                 #     assert False, 'Model diverged'
                 #     break
 
+        param_df['loss_unrestricted'] = loss_unrestricted
         param_df['loss_differences'] = loss_differences
+        param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
         param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
     return param_df
 
 
 if __name__ == "__main__":
     # Load training data
-    input_folder = Path('/home/jakub/Desktop/dev-pol-ii-analysis/data/drosophila_mutants/refactored_train_data/')
-    with open(input_folder / 'train_data.pkl', 'rb') as file:
-        train_data = pickle.load(file)
+    input_folder = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/train_data')
+    with open(input_folder / 'gene_data.pkl', 'rb') as file:
+        gene_data_list = pickle.load(file)
 
-    gene_data_list = [GeneData(**gene_data_dict) for gene_data_dict in train_data]
+    # gene_data_list = [GeneData(**gene_data_dict) for gene_data_dict in train_data]
 
     # Load or create dataset metadata    
     design_matrix_df = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1],
@@ -248,60 +250,63 @@ if __name__ == "__main__":
 
     device = 'cpu'
     # %%
-    all_results = []
-    for gene_data in tqdm(gene_data_list):
-        all_results.append(get_results_for_gene(gene_data=gene_data, dataset_metadata=dataset_metadata))
+    # all_results = []
+    # for gene_data in tqdm(gene_data_list):
+    #     all_results.append(get_results_for_gene(gene_data=gene_data, dataset_metadata=dataset_metadata))
 
     # %%
 
-    # gene_data = gene_data_list[0]
-    # gene_data = gene_data.to(device)
-    # dataset_metadata = dataset_metadata.to(device)
+    gene_data = gene_data_list[0]
+    gene_data = gene_data.to(device)
+    dataset_metadata = dataset_metadata.to(device)
 
-    # pol_2_total_loss = Pol2TotalLoss().to(device)
+    pol_2_total_loss = Pol2TotalLoss().to(device)
 
-    # model, training_results = train_model(gene_data=gene_data,
-    #                           dataset_metadata=dataset_metadata,
-    #                           pol_2_total_loss=pol_2_total_loss,
-    #                           device=device)
+    model, training_results = train_model(gene_data=gene_data,
+                                          dataset_metadata=dataset_metadata,
+                                          pol_2_total_loss=pol_2_total_loss,
+                                          device=device)
 
-    # param_df = model.get_param_df()
-    # fisher_information_matrix = get_fisher_information_matrix(model=model,
-    #                                                           pol_2_total_loss=pol_2_total_loss,
-    #                                                           gene_data=gene_data,
-    #                                                           dataset_metadata=dataset_metadata)
+    param_df = model.get_param_df()
+    fisher_information_matrix = get_fisher_information_matrix(model=model,
+                                                              pol_2_total_loss=pol_2_total_loss,
+                                                              gene_data=gene_data,
+                                                              dataset_metadata=dataset_metadata)
 
-    # param_df = add_wald_test_results(param_df, fisher_information_matrix)
+    param_df = add_wald_test_results(param_df, fisher_information_matrix)
 
-    # # Logic for LRT
+    # Logic for LRT
 
-    # loss_unrestricted = training_results.final_loss
+    loss_unrestricted = training_results.final_loss
 
-    # loss_differences: list[Optional[float]] = []
-    # for _, row in tqdm(param_df.iterrows()):        
-    #     if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
-    #         loss_differences.append(None)
-    #     else:
-    #         model_restricted = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)      
-    #         model_restricted.load_state_dict(model.state_dict())
+    loss_differences: list[Optional[float]] = []
+    for _, row in tqdm(param_df.iterrows()):
+        if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
+            loss_differences.append(None)
+        else:
+            model_restricted = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)
+            model_restricted.load_state_dict(model.state_dict())
 
-    #         model_restricted.set_parameter_mask(param_name=row['parameter_type'],
-    #                                  feature_name=row['feature_name'],
-    #                                  intron_name = None if row['parameter_type']=='alpha' else row['intron_name'],
-    #                                  value=0.0)
-    #         model_restricted, training_results = train_model(gene_data=gene_data,
-    #                                   dataset_metadata=dataset_metadata,
-    #                                   pol_2_total_loss=pol_2_total_loss,
-    #                                   device=device,
-    #                                   model=model_restricted)
-    #         if training_results.converged:
-    #             loss_differences.append(training_results.final_loss - loss_unrestricted)
-    #         else:
-    #             loss_differences.append(None)      
+            model_restricted.set_parameter_mask(param_name=row['parameter_type'],
+                                                feature_name=row['feature_name'],
+                                                intron_name=None if row['parameter_type'] == 'alpha' else row[
+                                                    'intron_name'],
+                                                value=0.0)
+            model_restricted, training_results = train_model(gene_data=gene_data,
+                                                             dataset_metadata=dataset_metadata,
+                                                             pol_2_total_loss=pol_2_total_loss,
+                                                             device=device,
+                                                             model=model_restricted)
+            if training_results.converged:
+                loss_differences.append(training_results.final_loss - loss_unrestricted)
+            else:
+                loss_differences.append(None)
 
-    #         if training_results.final_loss > 1e6:
-    #             assert False, 'Model diverged'
-    #             break
+            if training_results.final_loss > 1e6:
+                assert False, 'Model diverged'
+                break
 
-    # param_df['loss_differences'] = loss_differences
-    # param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
+    param_df['loss_unrestricted'] = loss_unrestricted
+    param_df['loss_differences'] = loss_differences
+    param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
+    param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
