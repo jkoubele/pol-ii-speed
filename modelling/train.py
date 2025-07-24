@@ -22,6 +22,7 @@ class TrainingResults:
     num_epochs: int
     losses: list[float]
     gradient_norms: list[float]
+    post_adam_loss: Optional[float] = None
 
 
 def train_model(gene_data: GeneData,
@@ -31,7 +32,8 @@ def train_model(gene_data: GeneData,
                 max_epochs=100,
                 max_patience=5,
                 loss_change_tolerance=1e-6,
-                model: Optional[Pol2Model] = None
+                model: Optional[Pol2Model] = None,
+                adam_steps=1
                 ) -> tuple[Pol2Model, TrainingResults]:
     if model is None:
         model = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)
@@ -43,7 +45,9 @@ def train_model(gene_data: GeneData,
                             tolerance_change=1e-09,
                             tolerance_grad=1e-07,
                             history_size=100,
-                            line_search_fn=None)
+                            line_search_fn='strong_wolfe') # 'strong_wolfe'
+    
+    # optimizer = optim.Adam(model.parameters(),lr=1e-2)
 
     def closure():
         optimizer.zero_grad()
@@ -57,10 +61,26 @@ def train_model(gene_data: GeneData,
                                 phi=phi)
         loss.backward()
         
-        # grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1e20)
-        # closure.grad_norm = grad_norm  # save to function attribute
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1e20)
+        closure.grad_norm = grad_norm  # save to function attribute
     
         return loss
+    
+    adam_optimizer = optim.Adam(model.parameters(),lr=1e-2)
+    for _ in trange(adam_steps):  # You can adjust 200 to 100–500
+        adam_optimizer.zero_grad()
+        predicted_reads_exon, predicted_reads_intron, phi = model(dataset_metadata.design_matrix,
+                                                                   dataset_metadata.log_library_sizes)
+        loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
+                                reads_introns=gene_data.intron_reads,
+                                coverage=gene_data.coverage,
+                                predicted_reads_exon=predicted_reads_exon,
+                                predicted_reads_intron=predicted_reads_intron,
+                                phi=phi)
+        loss.backward()
+        adam_optimizer.step()
+    
+    post_adam_loss = loss.item()
 
     previous_loss = None
     patience_counter = 0
@@ -69,29 +89,36 @@ def train_model(gene_data: GeneData,
 
     losses: list[float] = []
     gradient_norms: list[float] = []
-    for epoch in trange(max_epochs):
+    for epoch in range(max_epochs):
         loss = optimizer.step(closure).item()
-        # grad_norm = closure.grad_norm  # retrieve from closure
+        grad_norm = closure.grad_norm  # retrieve from closure
 
         losses.append(loss)
-        # gradient_norms.append(grad_norm)
+        gradient_norms.append(grad_norm)
+        if np.isnan(loss):
+            break
 
         if previous_loss is not None:
             relative_loss_change = abs(loss - previous_loss) / (abs(previous_loss) + 1e-10)
             if relative_loss_change < loss_change_tolerance:
                 patience_counter += 1
                 if patience_counter >= max_patience:
-                    converged = True
+                    converged = True                    
                     break
             else:
                 patience_counter = 0
 
         previous_loss = loss
+        
+    
+    
+    
     training_results = TrainingResults(final_loss=loss,
                                        converged_within_max_epochs=converged,
                                        num_epochs=epoch + 1,
                                        losses=losses,
-                                       gradient_norms=gradient_norms)
+                                       gradient_norms=gradient_norms,
+                                       post_adam_loss=post_adam_loss)
 
     return model, training_results
 
@@ -188,6 +215,7 @@ def get_results_for_gene(gene_data: GeneData,
 
     param_df = model.get_param_df()
     param_df['gene_name'] = gene_data.gene_name
+    param_df['loss_unrestricted'] = training_results.final_loss
 
     if perform_wald_test:
         fisher_information_matrix = get_fisher_information_matrix(model=model,
@@ -229,7 +257,7 @@ def get_results_for_gene(gene_data: GeneData,
                 #     assert False, 'Model diverged'
                 #     break
 
-        param_df['loss_unrestricted'] = loss_unrestricted
+        
         param_df['loss_differences'] = loss_differences
         param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
         param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
@@ -262,14 +290,18 @@ if __name__ == "__main__":
     device = 'cpu'
     # %%
     # all_results = []
-    # for gene_data in tqdm(gene_data_list[:10]):
+    # for gene_data in tqdm(gene_data_list[:5]):
     #     all_results.append(get_results_for_gene(gene_data=gene_data, 
     #                                             dataset_metadata=dataset_metadata,
-    #                                             perform_lrt=False))
+    #                                             perform_lrt=True))
     # df_all = pd.concat(all_results)
 
     # %%
     
+    # gene_name	FBgn0000120 - large loss but may be ok (32k loss) - is ok as the read counts is quite high
+	# gene_name FBgn0000250 - negative loss (thats ok since continuous NLL can be both positive and negative)
+    # gene_name FBgn0000036 diverging training
+
 
     gene_data = [x for x in gene_data_list if x.gene_name == 'FBgn0000036'][0]
     gene_data = gene_data.to(device)
@@ -280,16 +312,15 @@ if __name__ == "__main__":
     model, training_results = train_model(gene_data=gene_data,
                                           dataset_metadata=dataset_metadata,
                                           pol_2_total_loss=pol_2_total_loss,
-                                          device=device)
+                                          device=device,
+                                          adam_steps=1)
 
     print(f"{training_results=}")
     
 
     param_df = model.get_param_df()
     
-    import sys
-
-    sys.exit(0)
+ 
     
     fisher_information_matrix = get_fisher_information_matrix(model=model,
                                                               pol_2_total_loss=pol_2_total_loss,

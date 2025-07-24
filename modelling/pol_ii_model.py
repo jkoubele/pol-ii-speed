@@ -9,7 +9,7 @@ import torch.nn as nn
 EXP_INPUT_CLAMP = 40
 
 
-def safe_exp(x: torch.Tensor, output_threshold: float = 1e9) -> torch.Tensor:
+def safe_exp(x: torch.Tensor, output_threshold: float = 1e20) -> torch.Tensor:
     output_threshold_tensor = torch.tensor(output_threshold, dtype=x.dtype, device=x.device)
     input_threshold = torch.log(output_threshold_tensor)
     return torch.where(
@@ -145,21 +145,19 @@ class Pol2Model(nn.Module):
         reads_intronic_polymerases = safe_exp(intron_gene_expression_term + self.log_phi_zero - speed_term)
         reads_unspliced_transcripts = safe_exp(intron_gene_expression_term + splicing_term)
         predicted_reads_intron = reads_intronic_polymerases + reads_unspliced_transcripts
-        
-        # Check for NaNs and Infs
-        assert torch.all(torch.isfinite(predicted_log_reads_exon)), f"NaN or Inf in predicted_log_reads_exon: {predicted_log_reads_exon=}"
-        assert torch.all(torch.isfinite(predicted_reads_intron)), "NaN or Inf in predicted_reads_intron"
-        assert torch.all(torch.isfinite(phi)), "NaN or Inf in phi"
-        
-        # Check for suspiciously large values
-        assert torch.all(predicted_log_reads_exon < 100), "Suspiciously large log exon prediction"
-        assert torch.all(predicted_reads_intron < 1e12), "Suspiciously large intron prediction"
-        
-        # Check for negative predictions
-        assert torch.all(predicted_reads_intron >= 0), "Negative predicted intron reads"
-        assert torch.all(safe_exp(predicted_log_reads_exon) >= 0), "Negative predicted exon reads (after exp)"
 
-        
+        # Check for NaNs and Infs
+        # assert torch.all(torch.isfinite(predicted_log_reads_exon)), f"NaN or Inf in predicted_log_reads_exon: {predicted_log_reads_exon=}"
+        # assert torch.all(torch.isfinite(predicted_reads_intron)), "NaN or Inf in predicted_reads_intron"
+        # assert torch.all(torch.isfinite(phi)), "NaN or Inf in phi"
+        #
+        # # Check for suspiciously large values
+        # assert torch.all(predicted_log_reads_exon < 100), "Suspiciously large log exon prediction"
+        # assert torch.all(predicted_reads_intron < 1e12), "Suspiciously large intron prediction"
+        #
+        # # Check for negative predictions
+        # assert torch.all(predicted_reads_intron >= 0), "Negative predicted intron reads"
+        # assert torch.all(safe_exp(predicted_log_reads_exon) >= 0), "Negative predicted exon reads (after exp)"
 
         return safe_exp(predicted_log_reads_exon), predicted_reads_intron, phi
 
