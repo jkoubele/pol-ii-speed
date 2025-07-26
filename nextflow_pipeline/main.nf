@@ -38,20 +38,70 @@ process MultiQC {
     """
 }
 
+process BuildStarIndex {
+    container 'bioinfo_tools'
+
+    input:
+    path fasta
+    path gtf
+
+    output:
+    path("star_index"), emit: star_index_dir
+
+    publishDir "results/STAR_index", mode: 'symlink'
+
+    script:
+    """
+    mkdir star_index
+    STAR \
+      --runThreadN 16 \
+      --runMode genomeGenerate \
+      --genomeDir star_index \
+      --genomeFastaFiles $fasta \
+      --sjdbGTFfile $gtf
+    """
+}
+
+process STARAlign {
+    container 'bioinfo_tools'
+
+    input:
+    tuple val(sample), path(read1), path(read2), val(strand), path(star_index)
+
+    output:
+    path("${sample}.Aligned.sortedByCoord.out.bam"), emit: star_bam
+    path("${sample}.Log.final.out")
+
+    publishDir "results/star", mode: 'copy'
+
+    script:
+    """
+    STAR \
+      --runThreadN ${task.cpus} \
+      --genomeDir $star_index \
+      --readFilesIn $read1 $read2 \
+      --readFilesCommand zcat \
+      --outSAMtype BAM SortedByCoordinate \
+      --outFileNamePrefix ${sample}. \
+      --limitBAMsortRAM 10000000000
+    """
+}
+
+
 
 
 workflow {
+    def star_index_channel
+    if (params.star_index) {
+        log.info "Using provided STAR index: ${params.star_index}"
+        star_index_channel = Channel.value(file(params.star_index))
+    } else {
+        log.info "No STAR index provided. Building from genome FASTA and GTF."
+        star_index_channel = BuildStarIndex(file(params.genome_fasta), file(params.gtf_file)).star_index_dir
+    }
 
-//  Channel
-//         .fromPath("/cellfile/datapublic/jkoubele/dev-pol-ii-analysis/nextflow_pipeline/results/fastqc/*.zip")
-//         .collect()
-//         .set { fastqc_zips }
 
-//     MultiQC(fastqc_zips)
-
-
-
-    def samples = Channel
+    samples = Channel
         .fromPath(params.samplesheet)
         .splitCsv(header: true)
         .map { row ->
@@ -69,11 +119,11 @@ workflow {
             tuple(sample, fq1, fq2, strand)
         }
 
-        def fastqc_out = FastQC(samples)
-        fastqc_out.fastqc_reports.collect().set { fastqc_zips }
-        MultiQC(fastqc_zips)
+    fastqc_out = FastQC(samples)
+    fastqc_out.fastqc_reports.collect().set { fastqc_zips }
+    MultiQC(fastqc_zips)
+
+    samples.combine(star_index_channel) | view | STARAlign
 
 
 }
-
-
