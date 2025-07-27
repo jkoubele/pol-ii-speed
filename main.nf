@@ -5,10 +5,10 @@ process FastQC {
     input:
     tuple val(sample), path(read1), path(read2), val(strand) // val(strand) is optional, since we dont use it in this process
 
-    tag "$sample"  // For better logging
+    tag "$sample"
 
     output:
-    path("*.zip"), emit: fastqc_reports // we name the output of .zip files so it can be used downstream, e.g. in MultiQC
+    path("*.zip"), emit: fastqc_reports
     path("*.html")
 
     publishDir "results/fastqc", mode: 'symlink'
@@ -17,7 +17,7 @@ process FastQC {
     script:
     """
     fastqc $read1 $read2 --outdir .
-    """ // Nextflow searches for declared output only in the 'current' folder; since FastQC creates subfolder, we need to move it
+    """
 }
 
 process MultiQC {
@@ -35,6 +35,26 @@ process MultiQC {
     script:
     """
     multiqc . --filename multiqc_report.html
+    """
+}
+
+process ExtractIntrons {
+    container 'bioinfo_tools'
+
+    input:
+    path gtf
+
+    output:
+    path("introns.bed"), emit: introns_bed_file
+
+    publishDir "results/extracted_introns", mode: 'copy'
+
+
+    script:
+    """
+    python3 ${projectDir}/scripts/extract_introns_from_gtf.py \\
+        --gtf_file $gtf \\
+        --gtf_source ${params.gtf_source} \\
     """
 }
 
@@ -74,6 +94,8 @@ process STARAlign {
 
     publishDir "results/star", mode: 'copy'
 
+    tag "$sample"
+
     script:
     """
     STAR \
@@ -82,11 +104,13 @@ process STARAlign {
       --readFilesIn $read1 $read2 \
       --readFilesCommand zcat \
       --outSAMtype BAM SortedByCoordinate \
+      --outSAMattributes All \
+      --quantMode GeneCounts \
+      --peOverlapNbasesMin 1 \
       --outFileNamePrefix ${sample}. \
-      --limitBAMsortRAM 10000000000
+      --limitBAMsortRAM 50000000000
     """
 }
-
 
 
 
@@ -99,6 +123,8 @@ workflow {
         log.info "No STAR index provided. Building from genome FASTA and GTF."
         star_index_channel = BuildStarIndex(file(params.genome_fasta), file(params.gtf_file)).star_index_dir
     }
+
+    def introns = ExtractIntrons(file(params.gtf_file))
 
 
     samples = Channel
@@ -123,7 +149,7 @@ workflow {
     fastqc_out.fastqc_reports.collect().set { fastqc_zips }
     MultiQC(fastqc_zips)
 
-    samples.combine(star_index_channel) | view | STARAlign
+    samples.combine(star_index_channel) | STARAlign
 
 
 }
