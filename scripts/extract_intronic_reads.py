@@ -91,7 +91,7 @@ if __name__ == "__main__":
                                    key, value in introns_by_chrom_and_strand.items()}
 
     # TODO: here we assume that introns are not overlapping.
-    # We should explicitely check for that and either raise error, or handle it as a specific case.
+    # We should explicitly check for that and either raise error, or handle it as a specific case.
     intron_starts_by_chrom_and_strand = {key: [intron.start for intron in value] for
                                          key, value in introns_by_chrom_and_strand.items()}
     intron_ends_by_chrom_and_strand = {key: [intron.end for intron in value] for

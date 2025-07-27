@@ -11,7 +11,7 @@ process FastQC {
     path("*.zip"), emit: fastqc_reports
     path("*.html")
 
-    publishDir "results/fastqc", mode: 'symlink'
+    publishDir "${params.outdir}/fastqc", mode: 'symlink'
 
 
     script:
@@ -30,7 +30,7 @@ process MultiQC {
     path("multiqc_report.html")
     path("multiqc_report_data")
 
-    publishDir "results/multiqc", mode: 'copy'
+    publishDir "${params.outdir}/multiqc", mode: 'copy'
 
     script:
     """
@@ -47,7 +47,7 @@ process ExtractIntrons {
     output:
     path("introns.bed"), emit: introns_bed_file
 
-    publishDir "results/extracted_introns", mode: 'copy'
+    publishDir "${params.outdir}/extracted_introns", mode: 'copy'
 
 
     script:
@@ -68,7 +68,7 @@ process BuildStarIndex {
     output:
     path("star_index"), emit: star_index_dir
 
-    publishDir "results/STAR_index", mode: 'symlink'
+    publishDir "${params.outdir}/STAR_index", mode: 'symlink'
 
     script:
     """
@@ -92,7 +92,7 @@ process STARAlign {
     path("${sample}.Aligned.sortedByCoord.out.bam"), emit: star_bam
     path("${sample}.Log.final.out")
 
-    publishDir "results/star", mode: 'copy'
+    publishDir "${params.outdir}/star", mode: 'copy'
 
     tag "$sample"
 
@@ -126,7 +126,6 @@ workflow {
 
     def introns = ExtractIntrons(file(params.gtf_file))
 
-
     samples = Channel
         .fromPath(params.samplesheet)
         .splitCsv(header: true)
@@ -150,6 +149,5 @@ workflow {
     MultiQC(fastqc_zips)
 
     samples.combine(star_index_channel) | STARAlign
-
 
 }
