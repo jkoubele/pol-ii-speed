@@ -145,11 +145,10 @@ if __name__ == "__main__":
     create_bam_output = args.create_bam_output
     create_bed_output = args.create_bed_output
 
-    introns_df = pd.read_csv(args.intron_bed_file, sep='\t',
-                             names=['chromosome', 'start', 'end', 'name', 'score', 'strand'])
-
     output_folder.mkdir(exist_ok=True, parents=True)
 
+    introns_df = pd.read_csv(args.intron_bed_file, sep='\t',
+                             names=['chromosome', 'start', 'end', 'name', 'score', 'strand'])
     introns_by_chrom_and_strand: dict[ChromAndStrand, list[Intron]] = defaultdict(list)
     for name, chromosome, strand, start, end in zip(introns_df['name'],
                                                     introns_df['chromosome'],
@@ -169,13 +168,14 @@ if __name__ == "__main__":
     introns_by_chrom_and_strand = {key: sorted(value, key=lambda x: x.start) for
                                    key, value in introns_by_chrom_and_strand.items()}
 
+    # Check whether introns are not overlapping
     for intron_list in introns_by_chrom_and_strand.values():
         for intron_1, intron_2 in zip(intron_list, intron_list[1:]):
             if intron_1.end > intron_2.start:
                 raise ValueError(
                     f"Overlapping introns detected:\n"
-                    f"{intron_1.name=} [{intron_1.start=}, {intron_1.end=}"
-                    f"{intron_2.name=} [{intron_2.start=}, {intron_2.end=})\n"
+                    f"{intron_1.name=}, {intron_1.start=}, {intron_1.end=} \n"
+                    f"{intron_2.name=}, {intron_2.start=}, {intron_2.end=} \n"
                     f"Please provide a .bed file with non-overlapping introns."
                 )
 
@@ -201,13 +201,11 @@ if __name__ == "__main__":
         open(output_bed_minus_strand_path, 'w').close()
         bed_output_minus_strand = open(output_bed_minus_strand_path, 'a')
 
-    all_chrom = set()
     for alignment in generate_alignments(bam_input=bam_input,
                                          paired=True,
                                          strandendess_type=strandendess_type,
                                          mapq_threshold=args.mapq_threshold):
         intron_list = introns_by_chrom_and_strand.get(ChromAndStrand(alignment.chromosome, alignment.strand))
-        all_chrom.add(alignment.chromosome)
         if not intron_list:
             continue  # for a case that no introns are present on given contig, e.g. for MtDNA
         aligned_blocks = py_interval(*(
