@@ -3,7 +3,7 @@ process FastQC {
     container 'quay.io/biocontainers/fastqc:0.12.1--hdfd78af_0'
 
     input:
-    tuple val(sample), path(read1), path(read2), val(strand) // val(strand) is optional, since we dont use it in this process
+    tuple val(sample), path(read1), path(read2)
 
     tag "$sample"
 
@@ -54,7 +54,7 @@ process ExtractIntronsFromGTF {
     """
     extract_introns_from_gtf.py \\
         --gtf_file $gtf \\
-        --gtf_source ${params.gtf_source} \\
+        --gtf_source ${params.gtf_source}
     """
 }
 
@@ -74,7 +74,7 @@ process BuildStarIndex {
     """
     mkdir star_index
     STAR \
-      --runThreadN 16 \
+      --runThreadN ${task.cpus} \
       --runMode genomeGenerate \
       --genomeDir star_index \
       --genomeFastaFiles $fasta \
@@ -87,20 +87,32 @@ process BuildSalmonIndex {
 
     input:
     path transcriptome_fasta
+    path genome_fasta
+    path gtf
 
     output:
     path("salmon_index"), emit: salmon_index_dir
+    path ("decoy_transcriptome/gentrome.fa")
+    path("decoy_transcriptome/decoys.txt")
 
     publishDir "${params.outdir}/salmon_index", mode: 'symlink'
-    // TODO: Consider using decoy when building the index
+
     script:
     def gencode_flag = params.gtf_source == 'gencode' ? '--gencode' : ''
     """
+    generateDecoyTranscriptome.sh \
+        -a $gtf \
+        -g $genome_fasta \
+        -t $transcriptome_fasta \
+        -o decoy_transcriptome \
+        -j ${task.cpus}
+
     mkdir salmon_index
     salmon index \
-      -t $transcriptome_fasta \
+      -t decoy_transcriptome/gentrome.fa \
+      -d decoy_transcriptome/decoys.txt \
       -i salmon_index \
-      -p 8 \
+      -p ${task.cpus} \
       ${gencode_flag}
     """
 }
@@ -129,7 +141,7 @@ process STARAlign {
       --outSAMtype BAM SortedByCoordinate \
       --outSAMattributes All \
       --quantMode GeneCounts \
-      --peOverlapNbasesMin 1 \
+      --peOverlapNbasesMin 10 \
       --outFileNamePrefix ${sample}. \
       --limitBAMsortRAM 50000000000
     """
@@ -142,7 +154,7 @@ process ExtractIntronicReads {
         tuple val(sample), path(bam_file), val(strand), path(introns_bed_file)
 
     output:
-        tuple val(sample), path("intronic_reads_sorted.bam"), emit:  intronic_bams
+        tuple val(sample), path("intronic_reads_sorted.bam"), emit:  intronic_bam_files
         tuple val(sample), path("intronic_reads_plus_strand.bed.gz"), path("intronic_reads_minus_strand.bed.gz"),  emit:  intronic_bed_files
         tuple val(sample), path("intron_read_counts.tsv"), emit:  intron_read_counts
 
@@ -200,13 +212,18 @@ process RemoveIntronicReadsFromFASTQ {
 
 
 workflow {
+
+    def gtf_channel = Channel.value(file(params.gtf_file))
+    def genome_fasta_channel = Channel.value(file(params.genome_fasta))
+    def transcriptome_fasta_channel = Channel.value(file(params.transcriptome_fasta))
+
     def star_index_channel
     if (params.star_index) {
         log.info "Using provided STAR index: ${params.star_index}"
         star_index_channel = Channel.value(file(params.star_index))
     } else {
         log.info "No STAR index provided. Building from genome FASTA and GTF."
-        star_index_channel = BuildStarIndex(file(params.genome_fasta), file(params.gtf_file)).star_index_dir
+        star_index_channel = BuildStarIndex(genome_fasta_channel, gtf_channel).star_index_dir
     }
 
     def salmon_index_channel
@@ -215,10 +232,10 @@ workflow {
         salmon_index_channel = Channel.value(file(params.salmon_index))
     } else {
         log.info "No Salmon index provided. Building from transcriptome FASTA."
-        salmon_index_channel = BuildSalmonIndex(file(params.transcriptome_fasta)).salmon_index_dir
+        salmon_index_channel = BuildSalmonIndex(transcriptome_fasta_channel, genome_fasta_channel, gtf_channel).salmon_index_dir
     }
 
-    def introns = ExtractIntronsFromGTF(file(params.gtf_file))
+    def introns = ExtractIntronsFromGTF(gtf_channel)
 
     samples = Channel
         .fromPath(params.samplesheet)
@@ -238,7 +255,7 @@ workflow {
             tuple(sample, fq1, fq2, strand)
         }
 
-    fastqc_out = FastQC(samples)
+    fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
     fastqc_out.fastqc_reports.collect() | MultiQC
 
     aligned_bams = samples
@@ -249,15 +266,13 @@ workflow {
 
     extracted_intronic_reads = aligned_bams.star_bam
     .combine(introns.introns_bed_file)
-    .map { sample, bam, strand, bed -> tuple(sample, bam, strand, bed) }
+    .map { sample, bam, strand, introns_bed_file -> tuple(sample, bam, strand, introns_bed_file) }
     | ExtractIntronicReads
 
     exonic_fastq = samples
     .map { sample, r1, r2, strand -> tuple(sample, [r1, r2]) }
-    .join(extracted_intronic_reads.intronic_bams).map { sample, reads, intronic_bam ->
+    .join(extracted_intronic_reads.intronic_bam_files).map { sample, reads, intronic_bam ->
         tuple(sample, reads[0], reads[1], intronic_bam)
     } | RemoveIntronicReadsFromFASTQ
-
-//     exonic_fastq.exonic_fastq | view
 
 }

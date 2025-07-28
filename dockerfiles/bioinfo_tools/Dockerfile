@@ -5,7 +5,7 @@ RUN apt update && apt upgrade -y && apt install -y \
     curl unzip pigz pbzip2 default-jre perl build-essential vim-common \
     zlib1g-dev xxd libncurses-dev liblzma-dev libbz2-dev libcurl4-openssl-dev \
     libssl-dev libncurses5-dev libsqlite3-dev libreadline-dev libtk8.6 \
-    libgdm-dev libdb4o-cil-dev libpcap-dev jq git
+    libgdm-dev libdb4o-cil-dev libpcap-dev jq git cmake libgsl-dev
 
 # Download and install Atria
 RUN curl -L -O https://github.com/cihga39871/Atria/releases/download/v4.0.3/atria-4.0.3-linux-ubuntu22.tar.gz && \
@@ -60,6 +60,14 @@ RUN curl -L -O https://github.com/COMBINE-lab/salmon/releases/download/v1.10.0/s
     rm salmon-1.10.0_linux_x86_64.tar.gz
 ENV PATH="/salmon-latest_linux_x86_64/bin:$PATH"
 
-# Install Python packages from requirement file
+# Install and compile MashMap
+RUN curl -L -O https://github.com/marbl/MashMap/archive/refs/tags/v3.1.3.tar.gz && \
+    tar xzvf v3.1.3.tar.gz && \
+    rm v3.1.3.tar.gz && \
+    cmake -S MashMap-3.1.3 -B MashMap-3.1.3/build -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build MashMap-3.1.3/build
+ENV PATH="/MashMap-3.1.3/build/bin:$PATH"
+
+# Install Python packages from requirements file
 COPY . .
 RUN pip3 install -r requirements.txt
