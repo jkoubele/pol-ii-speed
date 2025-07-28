@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import gzip
 from pathlib import Path
@@ -9,17 +11,23 @@ from tqdm import tqdm
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--bam_introns',
-                        default='/cellfile/datapublic/jkoubele/celegans_mutants/intronic_reads/K002000093_54873/intronic_reads_sorted.bam')
+                        type=Path,
+                        required=True,
+                        help='Path to the BAM files with introns.')
     parser.add_argument('--input_fastq',
-                        default='/cellfile/datapublic/jkoubele/celegans_mutants/FASTQ/K002000093_54873/R1.fastq.gz')
+                        type=Path,
+                        required=True,
+                        default='Path to the input FASTQ files (compressed as .gz).')
     parser.add_argument('--output_fastq',
-                        default='/cellfile/datapublic/jkoubele/celegans_mutants/FASTQ_without_intronic_reads/K002000093_54873/R1.fastq')
+                        type=Path,
+                        required=True,
+                        default='Name (path) of the output FASTQ file.')
     args = parser.parse_args()
 
     intronic_reads_id: set[str] = set()
 
     with pysam.AlignmentFile(Path(args.bam_introns), "rb") as bam_input:
-        for read in tqdm(bam_input, desc="Reading BAM", mininterval=5):
+        for read in tqdm(bam_input, desc="Reading BAM", mininterval=1):
             intronic_reads_id.add(read.query_name)
 
     with gzip.open(Path(args.input_fastq), "rt") as handle_in, open(Path(args.output_fastq), "wt") as handle_out:
