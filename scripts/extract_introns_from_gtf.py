@@ -73,7 +73,7 @@ if __name__ == "__main__":
                         choices=['ensembl', 'gencode'],
                         required=True,
                         help="Either 'ensembl' or 'gencode'.")
-    parser.add_argument('--output_folder', type=Path, default=Path('.'))
+    parser.add_argument('--output_folder', type=Path, default='.')
     parser.add_argument('--min_length', type=int, default=50, help="Min. intron length")
     args = parser.parse_args()
     extract_genomic_features(gtf_file=args.gtf_file,
