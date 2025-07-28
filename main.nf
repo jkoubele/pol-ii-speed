@@ -121,10 +121,10 @@ process STARAlign {
     container 'bioinfo_tools'
 
     input:
-        tuple val(sample), path(read1), path(read2), val(strand), path(star_index)
+        tuple val(sample), path(read1), path(read2), path(star_index)
 
     output:
-        tuple val(sample), path("${sample}.Aligned.sortedByCoord.out.bam"), val(strand), emit: star_bam
+        tuple val(sample), path("${sample}.Aligned.sortedByCoord.out.bam"), emit: star_bam
         path("${sample}.Log.final.out")
 
     publishDir "${params.outdir}/star/${sample}", mode: 'copy'
@@ -209,6 +209,34 @@ process RemoveIntronicReadsFromFASTQ {
     """
 }
 
+process SalmonQuantification {
+    container 'bioinfo_tools'
+
+    input:
+        tuple val(sample), path(read1), path(read2), path(salmon_index)
+
+    output:
+        tuple val(sample), path("quant.sf"), emit: salmon_quant
+        tuple path("lib_format_counts.json"), path("logs/salmon_quant.log")
+
+    publishDir "${params.outdir}/salmon_quantification/${sample}", mode: 'copy'
+
+    tag "$sample"
+
+    script:
+    """
+    salmon quant \
+        -i $salmon_index \
+        -l A \
+        -1 $read1 \
+        -2 $read2 \
+        -p ${task.cpus} \
+        -o .
+    """
+}
+
+
+
 
 
 workflow {
@@ -235,7 +263,7 @@ workflow {
         salmon_index_channel = BuildSalmonIndex(transcriptome_fasta_channel, genome_fasta_channel, gtf_channel).salmon_index_dir
     }
 
-    def introns = ExtractIntronsFromGTF(gtf_channel)
+    def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel).introns_bed_file
 
     samples = Channel
         .fromPath(params.samplesheet)
@@ -260,19 +288,25 @@ workflow {
 
     aligned_bams = samples
     .combine(star_index_channel)
-    .map { sample, r1, r2, strand, index -> tuple(sample, r1, r2, strand, index) }
-    | STARAlign
+    .map { sample, r1, r2, strand, star_index ->
+        tuple(sample, r1, r2, star_index)
+    } | STARAlign
 
-
-    extracted_intronic_reads = aligned_bams.star_bam
-    .combine(introns.introns_bed_file)
-    .map { sample, bam, strand, introns_bed_file -> tuple(sample, bam, strand, introns_bed_file) }
+   extracted_intronic_reads = aligned_bams.star_bam
+    .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
+    .map { sample, bam, strand -> tuple(sample, bam, strand) }
+    .combine(introns_bed_channel)
+    .map { sample, bam, strand, introns_bed -> tuple(sample, bam, strand, introns_bed) }
     | ExtractIntronicReads
 
     exonic_fastq = samples
-    .map { sample, r1, r2, strand -> tuple(sample, [r1, r2]) }
-    .join(extracted_intronic_reads.intronic_bam_files).map { sample, reads, intronic_bam ->
-        tuple(sample, reads[0], reads[1], intronic_bam)
-    } | RemoveIntronicReadsFromFASTQ
+    .map { sample, r1, r2, strand -> tuple(sample, r1, r2) }
+    .join(extracted_intronic_reads.intronic_bam_files)
+    .map { sample, r1, r2, intronic_bam ->
+        tuple(sample, r1, r2, intronic_bam)
+    }
+    | RemoveIntronicReadsFromFASTQ
+
+    salmon_quant_out = exonic_fastq.exonic_fastq.combine(salmon_index_channel) | SalmonQuantification
 
 }
