@@ -1,7 +1,6 @@
 import argparse
 import bisect
 from collections import defaultdict
-from dataclasses import dataclass
 from enum import StrEnum
 from itertools import chain
 from pathlib import Path
@@ -18,8 +17,7 @@ class StrandednessType(StrEnum):
     REVERSE = 'reverse'
 
 
-@dataclass
-class Alignment:
+class Alignment(NamedTuple):
     chromosome: str
     strand: str
     read_1: pysam.AlignedSegment
