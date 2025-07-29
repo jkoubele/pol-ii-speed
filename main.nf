@@ -302,6 +302,29 @@ process ComputeCoverage {
     """
 }
 
+process RescaleCoverage {
+    container 'pol_ii_bioconductor'
+
+    input:
+        tuple val(sample), path(bedgraph_file_plus), path(bedgraph_file_minus), path(introns_bed_file)
+
+    output:
+        tuple val(sample), path("${sample}.parquet"), emit: coverage_parquet_file
+
+    publishDir "${params.outdir}/rescaled_coverage", mode: 'copy'
+
+    tag "$sample"
+
+    script:
+    """
+    compute_rescaled_coverage.R \
+        --bed_graph_plus $bedgraph_file_plus \
+        --bed_graph_minus $bedgraph_file_minus \
+        --introns_bed_file $introns_bed_file \
+        --output_file_basename $sample
+    """
+}
+
 workflow {
 
     def gtf_channel = Channel.value(file(params.gtf_file))
@@ -326,10 +349,6 @@ workflow {
         salmon_index_channel = BuildSalmonIndex(transcriptome_fasta_channel, genome_fasta_channel, gtf_channel).salmon_index_dir
     }
 
-    def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel).introns_bed_file
-    def tx2gene_out = PrepareTx2Gene(gtf_channel).tx2gene_file
-    def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
-
     samples = Channel
         .fromPath(params.samplesheet)
         .splitCsv(header: true)
@@ -348,28 +367,36 @@ workflow {
             tuple(sample, fq1, fq2, strand)
         }
 
-    fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
+    def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel).introns_bed_file
+    def tx2gene_out = PrepareTx2Gene(gtf_channel).tx2gene_file
+    def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
+
+    def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
     fastqc_out.fastqc_reports.collect() | MultiQC
 
-    aligned_bams = samples
+    def aligned_bams = samples
     .combine(star_index_channel)
     .map { sample, r1, r2, strand, star_index ->
         tuple(sample, r1, r2, star_index)
     } | STARAlign
 
-   extracted_intronic_reads = aligned_bams.star_bam
-    .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
-    .combine(introns_bed_channel)
-    | ExtractIntronicReads
+   def extracted_intronic_reads = aligned_bams.star_bam
+   .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
+   .combine(introns_bed_channel)
+   | ExtractIntronicReads
 
-    exonic_fastq = samples
-    .map { sample, r1, r2, strand -> tuple(sample, r1, r2) }
-    .join(extracted_intronic_reads.intronic_bam_files)
-    | RemoveIntronicReadsFromFASTQ
+   def exonic_fastq = samples
+   .map { sample, r1, r2, strand -> tuple(sample, r1, r2) }
+   .join(extracted_intronic_reads.intronic_bam_files)
+   | RemoveIntronicReadsFromFASTQ
 
-    salmon_quant_out = exonic_fastq.exonic_fastq.combine(salmon_index_channel) | SalmonQuantification
+   def salmon_quant_out = exonic_fastq.exonic_fastq
+   .combine(salmon_index_channel) | SalmonQuantification
 
-    extracted_intronic_reads.intronic_bed_files
-     .combine(fai_index)| ComputeCoverage
+   def bed_graph_coverage = extracted_intronic_reads.intronic_bed_files
+   .combine(fai_index)| ComputeCoverage
+
+   def rescaled_coverage = bed_graph_coverage.bed_graph_files
+   .combine(introns_bed_channel)| RescaleCoverage
 
 }
