@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=load_docker_image
 #SBATCH --ntasks=3
-#SBATCH --mem=30G
+#SBATCH --mem=20G
 
 usage() {
     echo "Usage: $0 -d <docker_image_path>"

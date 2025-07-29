@@ -117,6 +117,40 @@ process BuildSalmonIndex {
     """
 }
 
+process PrepareTx2Gene {
+    container 'pol_ii_bioconductor'
+
+    input:
+    path gtf
+
+    output:
+    path("tx2gene.tsv"), emit: tx2gene_file
+
+    publishDir "${params.outdir}/tx2gene", mode: 'copy'
+
+    script:
+    """
+    prepare_tx2gene.R --gtf_file $gtf
+    """
+}
+
+process CreateGenomeFastaIndex {
+    container 'bioinfo_tools'
+
+    input:
+    path genome_fasta
+
+    output:
+    path("*.fai"), emit: genome_fai_file
+
+    publishDir "${params.outdir}/genome_fai", mode: 'copy'
+
+    script:
+    """
+    samtools faidx $genome_fasta
+    """
+}
+
 process STARAlign {
     container 'bioinfo_tools'
 
@@ -143,7 +177,7 @@ process STARAlign {
       --quantMode GeneCounts \
       --peOverlapNbasesMin 10 \
       --outFileNamePrefix ${sample}. \
-      --limitBAMsortRAM 50000000000
+      --limitBAMsortRAM 30000000000
     """
 }
 
@@ -235,9 +269,38 @@ process SalmonQuantification {
     """
 }
 
+process ComputeCoverage {
+    container 'bioinfo_tools'
 
+    input:
+        tuple val(sample), path(bed_file_plus), path(bed_file_minus), path(genome_fai_file)
 
+    output:
+        tuple val(sample), path("coverage_plus.bedGraph.gz"), path("coverage_minus.bedGraph.gz"), emit: bed_graph_files
 
+    publishDir "${params.outdir}/bed_graph_intron_coverage/${sample}", mode: 'copy'
+
+    tag "$sample"
+
+    script:
+    """
+    bedtools genomecov \
+        -bga \
+        -split \
+        -i $bed_file_plus \
+        -g $genome_fai_file \
+        > coverage_plus.bedGraph
+        pigz -f coverage_plus.bedGraph
+
+    bedtools genomecov \
+        -bga \
+        -split \
+        -i $bed_file_minus \
+        -g $genome_fai_file \
+        > coverage_minus.bedGraph
+        pigz -f coverage_minus.bedGraph
+    """
+}
 
 workflow {
 
@@ -264,6 +327,8 @@ workflow {
     }
 
     def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel).introns_bed_file
+    def tx2gene_out = PrepareTx2Gene(gtf_channel).tx2gene_file
+    def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
     samples = Channel
         .fromPath(params.samplesheet)
@@ -294,19 +359,17 @@ workflow {
 
    extracted_intronic_reads = aligned_bams.star_bam
     .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
-    .map { sample, bam, strand -> tuple(sample, bam, strand) }
     .combine(introns_bed_channel)
-    .map { sample, bam, strand, introns_bed -> tuple(sample, bam, strand, introns_bed) }
     | ExtractIntronicReads
 
     exonic_fastq = samples
     .map { sample, r1, r2, strand -> tuple(sample, r1, r2) }
     .join(extracted_intronic_reads.intronic_bam_files)
-    .map { sample, r1, r2, intronic_bam ->
-        tuple(sample, r1, r2, intronic_bam)
-    }
     | RemoveIntronicReadsFromFASTQ
 
     salmon_quant_out = exonic_fastq.exonic_fastq.combine(salmon_index_channel) | SalmonQuantification
+
+    extracted_intronic_reads.intronic_bed_files
+     .combine(fai_index)| ComputeCoverage
 
 }
