@@ -190,7 +190,7 @@ process ExtractIntronicReads {
     output:
         tuple val(sample), path("intronic_reads_sorted.bam"), emit:  intronic_bam_files
         tuple val(sample), path("intronic_reads_plus_strand.bed.gz"), path("intronic_reads_minus_strand.bed.gz"),  emit:  intronic_bed_files
-        tuple val(sample), path("intron_read_counts.tsv"), emit:  intron_read_counts
+        tuple val(sample), path("${sample}.intron_read_counts.tsv"), emit:  intron_read_counts
 
     publishDir "${params.outdir}/intronic_reads/${sample}", mode: 'copy'
 
@@ -202,6 +202,8 @@ process ExtractIntronicReads {
         --input_bam $bam_file \\
         --intron_bed_file $introns_bed_file \\
         --strandedness $strand
+
+    mv intron_read_counts.tsv ${sample}.intron_read_counts.tsv
 
     sort -k 1,1 -k 2,2n intronic_reads_plus_strand.bed > tmp_plus_strand.bed
     mv tmp_plus_strand.bed intronic_reads_plus_strand.bed
@@ -250,7 +252,7 @@ process SalmonQuantification {
         tuple val(sample), path(read1), path(read2), path(salmon_index)
 
     output:
-        tuple val(sample), path("quant.sf"), emit: salmon_quant
+        tuple val(sample), path("${sample}.quant.sf"), emit: salmon_quant
         tuple path("lib_format_counts.json"), path("logs/salmon_quant.log")
 
     publishDir "${params.outdir}/salmon_quantification/${sample}", mode: 'copy'
@@ -266,6 +268,7 @@ process SalmonQuantification {
         -2 $read2 \
         -p ${task.cpus} \
         -o .
+    mv quant.sf ${sample}.quant.sf
     """
 }
 
@@ -325,6 +328,28 @@ process RescaleCoverage {
     """
 }
 
+process AggregateReadCounts {
+    container 'pol_ii_bioconductor'
+
+    input:
+    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene)
+
+    output:
+    path("*.tsv"), emit: aggregated_counts
+
+    publishDir "${params.outdir}/aggregated_counts", mode: 'copy'
+
+    script:
+    """
+    aggregate_read_counts.R \
+      --tx2gene $tx2gene \
+      --sample_names ${sample_names.join(' ')} \
+      --exon_quant_files ${exon_quant_files.join(' ')} \
+      --intron_counts_files ${intron_counts_files.join(' ')}
+    """
+}
+
+
 workflow {
 
     def gtf_channel = Channel.value(file(params.gtf_file))
@@ -368,11 +393,12 @@ workflow {
         }
 
     def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel).introns_bed_file
-    def tx2gene_out = PrepareTx2Gene(gtf_channel).tx2gene_file
+    def tx2gene_out = PrepareTx2Gene(gtf_channel)
     def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
     def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
-    fastqc_out.fastqc_reports.collect() | MultiQC
+    def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
+    fastqc_out_aggregated | MultiQC
 
     def aligned_bams = samples
     .combine(star_index_channel)
@@ -398,5 +424,19 @@ workflow {
 
    def rescaled_coverage = bed_graph_coverage.bed_graph_files
    .combine(introns_bed_channel)| RescaleCoverage
+
+    salmon_quant_out.salmon_quant
+     .join(extracted_intronic_reads.intron_read_counts)
+     .collect(flat: false).map { list_of_tuples ->
+    def sample_names = list_of_tuples*.getAt(0)
+    def quant_files  = list_of_tuples*.getAt(1)
+    def intron_files = list_of_tuples*.getAt(2)
+    tuple(sample_names, quant_files, intron_files)
+}.combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
+
+
+
+
+
 
 }
