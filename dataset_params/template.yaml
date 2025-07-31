@@ -1,0 +1,20 @@
+# TEMPLATE: Fill in all paths below to run the pipeline
+# Save as e.g. params/my_project.yaml and run with:
+#   nextflow run main.nf -params-file params/my_project.yaml
+
+outdir: "./results"  # Output folder for pipeline results
+
+samplesheet: "/path/to/your/samplesheet.csv"  # CSV file with sample, fastq_1, fastq_2, strandedness
+fastq_dir: "/path/to/FASTQ_files"            # Directory containing the FASTQ files of samples
+
+gtf_file: "/path/to/annotation.gtf"           # GTF annotation file
+genome_fasta: "/path/to/genome.fa"            # Genome FASTA file
+transcriptome_fasta: "/path/to/transcripts.fa" # Transcriptome FASTA file
+gtf_source: "ensembl"                          # either 'ensembl' or "gencode"
+
+# Optional paths to existing STAR and Salmon indices (can be left null to auto-generate)
+star_index: null
+salmon_index: null
+
+# Optional: use decoy-aware Salmon indexing (can use lots of memory for larger genomes)
+salmon_index_with_decoy: false
