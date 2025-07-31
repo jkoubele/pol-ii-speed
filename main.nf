@@ -11,7 +11,7 @@ process FastQC {
     path("*.zip"), emit: fastqc_reports
     path("*.html")
 
-    publishDir "${params.outdir}/fastqc", mode: 'symlink'
+    publishDir "${params.outdir}/fastqc", mode: 'copy'
 
 
     script:
@@ -58,6 +58,24 @@ process ExtractIntronsFromGTF {
     """
 }
 
+process GetGeneIDsFromGTF {
+    container 'pol_ii_bioconductor'
+
+    input:
+    path gtf
+
+    output:
+    tuple path("all_genes.csv"), path("protein_coding_genes.csv"), emit: gene_name_files
+
+    publishDir "${params.outdir}/gene_names", mode: 'copy'
+
+    script:
+    """
+    get_gene_ids_from_gtf.R \
+        --gtf_file $gtf
+    """
+}
+
 process BuildStarIndex {
     container 'bioinfo_tools'
 
@@ -68,7 +86,7 @@ process BuildStarIndex {
     output:
     path("star_index"), emit: star_index_dir
 
-    publishDir "${params.outdir}/STAR_index", mode: 'symlink'
+    publishDir "${params.outdir}/STAR_index", mode: 'copy'
 
     script:
     """
@@ -78,7 +96,8 @@ process BuildStarIndex {
       --runMode genomeGenerate \
       --genomeDir star_index \
       --genomeFastaFiles $fasta \
-      --sjdbGTFfile $gtf
+      --sjdbGTFfile $gtf \
+      --limitGenomeGenerateRAM 190000000000
     """
 }
 
@@ -95,7 +114,7 @@ process BuildSalmonIndex {
     path ("decoy_transcriptome/gentrome.fa", optional: true)
     path("decoy_transcriptome/decoys.txt", optional: true)
 
-    publishDir "${params.outdir}/salmon_index", mode: 'symlink'
+    publishDir "${params.outdir}/salmon_index", mode: 'copy'
 
     script:
     def gencode_flag = params.gtf_source == 'gencode' ? '--gencode' : ''
@@ -188,7 +207,7 @@ process STARAlign {
       --quantMode GeneCounts \
       --peOverlapNbasesMin 10 \
       --outFileNamePrefix ${sample}. \
-      --limitBAMsortRAM 30000000000
+      --limitBAMsortRAM 60000000000
     """
 }
 
@@ -410,6 +429,8 @@ workflow {
     def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel).introns_bed_file
     def tx2gene_out = PrepareTx2Gene(gtf_channel)
     def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
+
+    gtf_channel| GetGeneIDsFromGTF
 
     def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
     def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()

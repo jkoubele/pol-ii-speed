@@ -8,6 +8,11 @@ genome_fasta: "/cellfile/datapublic/pungerav/global_data/genomes/homo_sapiens/GE
 transcriptome_fasta: "/cellfile/datapublic/pungerav/global_data/genomes/homo_sapiens/GENCODE_GRCh38p14_genome/gencode.v47.transcripts.fa"
 gtf_source: "gencode"
 
+#gtf_file: "/cellfile/datapublic/crc1678/annotations/genome_assemblies/human/hg38/Homo_sapiens.GRCh38.112.gtf"
+#genome_fasta: "/cellfile/datapublic/crc1678/annotations/genome_assemblies/human/hg38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
+#transcriptome_fasta: "/cellfile/datapublic/crc1678/annotations/genome_assemblies/human/hg38/Homo_sapiens.GRCh38.cdna.all.fa"
+#gtf_source: "ensembl"
+
 star_index: null
 salmon_index: null
 salmon_index_with_decoy: false

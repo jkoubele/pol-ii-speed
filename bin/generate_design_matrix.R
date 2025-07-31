@@ -1,16 +1,20 @@
 library(argparse)
-library(tidyverse)
+library(readr)
 
 parser <- ArgumentParser()
-parser$add_argument("--sample_annotation",
-                    help = ".tsv file with sample annotation",
+parser$add_argument("--samplesheet",
+                    help = "A .csv file with sample annotation.",
                     default = '/cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/sample_annotation/sample_annotation.tsv')
+parser$add_argument("--formula",
+                    required=TRUE,
+                    help = "Design formula using standard R syntax (e.g. '~ age + genotype' or '~ age:condition')")
 parser$add_argument("--output_folder",
                     help = "",
-                    default = '/cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/sample_annotation')
+                    default = '.')
+
 args <- parser$parse_args()
 
-data <- read_tsv(args$sample_annotation)
+data <- readr::read_csv(args$samplesheet)
 
 # data <- data |> mutate(genotype = fct_relevel(as.factor(genotype), "wt"),
 #                        age = fct_relevel(as.factor(age), "young"))
