@@ -92,13 +92,14 @@ process BuildSalmonIndex {
 
     output:
     path("salmon_index"), emit: salmon_index_dir
-    path ("decoy_transcriptome/gentrome.fa")
-    path("decoy_transcriptome/decoys.txt")
+    path ("decoy_transcriptome/gentrome.fa", optional: true)
+    path("decoy_transcriptome/decoys.txt", optional: true)
 
     publishDir "${params.outdir}/salmon_index", mode: 'symlink'
 
     script:
     def gencode_flag = params.gtf_source == 'gencode' ? '--gencode' : ''
+    if (params.salmon_index_with_decoy) {
     """
     generateDecoyTranscriptome.sh \
         -a $gtf \
@@ -115,6 +116,16 @@ process BuildSalmonIndex {
       -p ${task.cpus} \
       ${gencode_flag}
     """
+    } else {
+        """
+        mkdir salmon_index
+        salmon index \
+            -t $transcriptome_fasta \
+            -i salmon_index \
+            -p ${task.cpus} \
+            ${gencode_flag}
+        """
+    }
 }
 
 process PrepareTx2Gene {
