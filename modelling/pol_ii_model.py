@@ -40,6 +40,7 @@ class DatasetMetadata:
     library_sizes: torch.Tensor
     log_library_sizes: torch.Tensor
     feature_names: list[str]
+    sample_names: list[str]
     num_coverage_bins: int = 100
 
     def to(self, device):

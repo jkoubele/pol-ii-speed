@@ -67,5 +67,5 @@ dds <- DESeqDataSetFromMatrix(countData = all_reads_matrix,
   estimateSizeFactors()
 
 size_factors <- sizeFactors(dds) |>
-  enframe(name = "sample_name", value = "library_size_factor")
+  enframe(name = "sample", value = "library_size_factor")
 write_tsv(size_factors, file.path(output_folder, "library_size_factors.tsv"))
