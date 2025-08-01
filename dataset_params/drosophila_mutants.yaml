@@ -1,0 +1,13 @@
+outdir: "/cellfile/datapublic/jkoubele/drosophila_mutants/results"
+
+samplesheet: "/cellfile/datapublic/jkoubele/drosophila_mutants/samplesheet.csv"
+fastq_dir: "/cellfile/datapublic/jkoubele/drosophila_mutants/FASTQ"
+
+gtf_file: "/cellfile/datapublic/jkoubele/example_pipeline/Drosophila_melanogaster.BDGP6.46.112.gtf"
+genome_fasta: "/cellfile/datapublic/jkoubele/example_pipeline/Drosophila_melanogaster.BDGP6.46.dna.toplevel.fa"
+transcriptome_fasta: "/cellfile/datapublic/jkoubele/example_pipeline/Drosophila_melanogaster.BDGP6.46.cdna.all.fa"
+gtf_source: "ensembl"
+
+star_index: null
+salmon_index: null
+salmon_index_with_decoy: true

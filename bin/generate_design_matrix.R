@@ -1,35 +1,64 @@
+#!/usr/bin/env Rscript
+
 library(argparse)
-library(readr)
+library(tidyverse)
 
 parser <- ArgumentParser()
 parser$add_argument("--samplesheet",
-                    help = "A .csv file with sample annotation.",
-                    default = '/cellfile/datapublic/jkoubele/data_pol_ii/human_astrocytes/sample_annotation/sample_annotation.tsv')
+                    required = TRUE,
+                    help = "A .csv file with sample annotation. Must include a 'sample' column.")
 parser$add_argument("--formula",
-                    required=TRUE,
+                    required = TRUE,
                     help = "Design formula using standard R syntax (e.g. '~ age + genotype' or '~ age:condition')")
+parser$add_argument("--factor_references",
+                    help = "An optional .csv file with factor base levels.")
 parser$add_argument("--output_folder",
                     help = "",
                     default = '.')
 
+
+# args <- parser$parse_args(
+#   c(
+#   "--samplesheet", "/cellfile/datapublic/jkoubele/example_pipeline/samplesheet.csv",
+#   "--formula", "~ age + genotype",
+#   "--output_folder", "/cellfile/datapublic/jkoubele/drosophila_mutants/results/experiment_design",
+#   "--factor_references", "/cellfile/datapublic/jkoubele/drosophila_mutants/factor_references.csv"
+#   )
+# )
+
 args <- parser$parse_args()
 
-data <- readr::read_csv(args$samplesheet)
+output_folder <- args$output_folder
 
-# data <- data |> mutate(genotype = fct_relevel(as.factor(genotype), "wt"),
-#                        age = fct_relevel(as.factor(age), "young"))
-data <- data |> mutate(age = fct_relevel(as.factor(age_group), "young"))
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder, recursive = TRUE)
+}
 
-formula <- ~age
-design_matrix <- model.matrix(formula, data)
+samplesheet <- readr::read_csv(args$samplesheet)
+
+if (!is.null(args$factor_references)) {
+  factor_references <- readr::read_csv(args$factor_references)
+  for (i in seq_len(nrow(factor_references))) {
+    var <- factor_references$factor_name[i]
+    ref <- factor_references$reference[i]
+
+    if (var %in% colnames(samplesheet)) {
+      samplesheet[[var]] <- forcats::fct_relevel(as.factor(samplesheet[[var]]), ref)
+    } else {
+      warning(sprintf("Column '%s' specified in factor_references not found in samplesheet.", var))
+    }
+  }
+
+}
+
+design_formula <- as.formula(args$formula)
+design_matrix <- model.matrix(design_formula, samplesheet)
+
+rownames(design_matrix) <- samplesheet$sample
 design_matrix <- design_matrix[, colnames(design_matrix) != "(Intercept)", drop = FALSE]
-
-rownames(design_matrix) <- data$sample_name
 
 df_out <- design_matrix |>
   as.data.frame() |>
-  rownames_to_column(var = "sample_name")
+  rownames_to_column(var = "sample")
 
-write_tsv(df_out, file.path(args$output_folder, 'design_matrix.tsv'))
-
-
+write_csv(df_out, file.path(output_folder, 'design_matrix.csv'))
