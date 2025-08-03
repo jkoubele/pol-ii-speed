@@ -1,4 +1,3 @@
-import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -10,8 +9,9 @@ import torch
 from scipy import stats
 from torch import optim
 from torch.func import functional_call, hessian
-from tqdm import tqdm, trange
+from tqdm import tqdm
 
+from load_dataset import load_dataset
 from pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 
 
@@ -21,38 +21,36 @@ class TrainingResults:
     converged_within_max_epochs: bool
     num_epochs: int
     losses: list[float]
-    gradient_norms: list[float]
-    post_adam_loss: Optional[float] = None
+    training_diverged: bool
 
 
 def train_model(gene_data: GeneData,
                 dataset_metadata: DatasetMetadata,
                 pol_2_total_loss: Pol2TotalLoss,
                 device: str,
-                max_epochs=100,
+                max_epochs=200,
                 max_patience=5,
                 loss_change_tolerance=1e-6,
                 model: Optional[Pol2Model] = None,
                 adam_steps=1
                 ) -> tuple[Pol2Model, TrainingResults]:
     if model is None:
-        model = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)
-        model.initialize_intercepts(gene_data, library_sizes)
+        model = Pol2Model(feature_names=dataset_metadata.feature_names,
+                          intron_names=gene_data.intron_names).to(device)
+        model.initialize_intercepts(gene_data, dataset_metadata.library_sizes)
 
     optimizer = optim.LBFGS(model.parameters(),
-                            lr=1.0,
-                            max_iter=50,
+                            lr=0.01,
+                            max_iter=20,
                             tolerance_change=1e-09,
                             tolerance_grad=1e-07,
                             history_size=100,
-                            line_search_fn='strong_wolfe') # 'strong_wolfe'
-    
-    # optimizer = optim.Adam(model.parameters(),lr=1e-2)
+                            line_search_fn='strong_wolfe')
 
     def closure():
         optimizer.zero_grad()
         predicted_reads_exon, predicted_reads_intron, phi = model(dataset_metadata.design_matrix,
-                                                                      dataset_metadata.log_library_sizes)
+                                                                  dataset_metadata.log_library_sizes)
         loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                 reads_introns=gene_data.intron_reads,
                                 coverage=gene_data.coverage,
@@ -60,65 +58,50 @@ def train_model(gene_data: GeneData,
                                 predicted_reads_intron=predicted_reads_intron,
                                 phi=phi)
         loss.backward()
-        
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1e20)
-        closure.grad_norm = grad_norm  # save to function attribute
-    
         return loss
-    
-    adam_optimizer = optim.Adam(model.parameters(),lr=1e-2)
-    for _ in trange(adam_steps):  # You can adjust 200 to 100–500
-        adam_optimizer.zero_grad()
-        predicted_reads_exon, predicted_reads_intron, phi = model(dataset_metadata.design_matrix,
-                                                                   dataset_metadata.log_library_sizes)
-        loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
-                                reads_introns=gene_data.intron_reads,
-                                coverage=gene_data.coverage,
-                                predicted_reads_exon=predicted_reads_exon,
-                                predicted_reads_intron=predicted_reads_intron,
-                                phi=phi)
-        loss.backward()
-        adam_optimizer.step()
-    
-    post_adam_loss = loss.item()
 
     previous_loss = None
     patience_counter = 0
 
-    converged = False
+    best_loss = np.inf
+    best_state_dict = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+    converged_within_max_epochs = False
+    training_diverged = False
 
     losses: list[float] = []
-    gradient_norms: list[float] = []
     for epoch in range(max_epochs):
         loss = optimizer.step(closure).item()
-        grad_norm = closure.grad_norm  # retrieve from closure
-
         losses.append(loss)
-        gradient_norms.append(grad_norm)
         if np.isnan(loss):
+            training_diverged = True
             break
+
+        if loss < best_loss:
+            best_loss = loss
+            best_state_dict = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
         if previous_loss is not None:
             relative_loss_change = abs(loss - previous_loss) / (abs(previous_loss) + 1e-10)
             if relative_loss_change < loss_change_tolerance:
                 patience_counter += 1
                 if patience_counter >= max_patience:
-                    converged = True                    
+                    converged_within_max_epochs = True
                     break
             else:
                 patience_counter = 0
 
         previous_loss = loss
-        
-    
-    
-    
+
+    if best_loss < loss or np.isnan(loss):
+        model.load_state_dict(best_state_dict)
+
     training_results = TrainingResults(final_loss=loss,
-                                       converged_within_max_epochs=converged,
+                                       converged_within_max_epochs=converged_within_max_epochs,
                                        num_epochs=epoch + 1,
                                        losses=losses,
-                                       gradient_norms=gradient_norms,
-                                       post_adam_loss=post_adam_loss)
+                                       training_diverged=training_diverged
+                                       )
 
     return model, training_results
 
@@ -230,11 +213,12 @@ def get_results_for_gene(gene_data: GeneData,
 
         loss_differences: list[Optional[float]] = []
 
-        for _, row in tqdm(param_df.iterrows()):
+        for _, row in param_df.iterrows():
             if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
                 loss_differences.append(None)
             else:
-                model_restricted = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(
+                model_restricted = Pol2Model(feature_names=dataset_metadata.feature_names,
+                                             intron_names=gene_data.intron_names).to(
                     device)
                 model_restricted.load_state_dict(model.state_dict())
 
@@ -253,11 +237,6 @@ def get_results_for_gene(gene_data: GeneData,
                 else:
                     loss_differences.append(None)
 
-                    # if training_results.final_loss > 1e6:
-                #     assert False, 'Model diverged'
-                #     break
-
-        
         param_df['loss_differences'] = loss_differences
         param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
         param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
@@ -265,102 +244,15 @@ def get_results_for_gene(gene_data: GeneData,
 
 
 if __name__ == "__main__":
-    # Load training data
-    input_folder = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants/train_data')
-    with open(input_folder / 'gene_data.pkl', 'rb') as file:
-        gene_data_list = pickle.load(file)
-
-    # gene_data_list = [GeneData(**gene_data_dict) for gene_data_dict in train_data]
-
-    # Load or create dataset metadata    
-    design_matrix_df = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1],
-                                          'dummy': 3 * [1] + 6 * [0] + 3 * [1]})
-    # design_matrix_df = pd.DataFrame(data={'genotype_rp2': 6 * [0] + 6 * [1]})    
-
-    feature_names = design_matrix_df.columns.to_list()
-    design_matrix = torch.tensor(design_matrix_df.to_numpy()).float()
-
-    library_sizes = torch.ones(len(design_matrix))
-
-    dataset_metadata = DatasetMetadata(design_matrix=design_matrix,
-                                       library_sizes=library_sizes,
-                                       log_library_sizes=torch.log(library_sizes),
-                                       feature_names=feature_names)
+    gene_data_list, dataset_metadata = load_dataset(
+        results_folder=Path('/home/jakub/Desktop/drosophila_mutants/results'),
+        gene_file_name='test_subset_2.csv',  # test_subset.csv
+        log_output_folder=Path('/home/jakub/Desktop/drosophila_mutants/results/model_results'))
 
     device = 'cpu'
-    # %%
-    # all_results = []
-    # for gene_data in tqdm(gene_data_list[:5]):
-    #     all_results.append(get_results_for_gene(gene_data=gene_data, 
-    #                                             dataset_metadata=dataset_metadata,
-    #                                             perform_lrt=True))
-    # df_all = pd.concat(all_results)
-
-    # %%
-    
-    # gene_name	FBgn0000120 - large loss but may be ok (32k loss) - is ok as the read counts is quite high
-	# gene_name FBgn0000250 - negative loss (thats ok since continuous NLL can be both positive and negative)
-    # gene_name FBgn0000036 diverging training
-
-
-    gene_data = [x for x in gene_data_list if x.gene_name == 'FBgn0000036'][0]
-    gene_data = gene_data.to(device)
-    dataset_metadata = dataset_metadata.to(device)
-
-    pol_2_total_loss = Pol2TotalLoss().to(device)
-
-    model, training_results = train_model(gene_data=gene_data,
-                                          dataset_metadata=dataset_metadata,
-                                          pol_2_total_loss=pol_2_total_loss,
-                                          device=device,
-                                          adam_steps=1)
-
-    print(f"{training_results=}")
-    
-
-    param_df = model.get_param_df()
-    
- 
-    
-    fisher_information_matrix = get_fisher_information_matrix(model=model,
-                                                              pol_2_total_loss=pol_2_total_loss,
-                                                              gene_data=gene_data,
-                                                              dataset_metadata=dataset_metadata)
-
-    param_df = add_wald_test_results(param_df, fisher_information_matrix)
-
-    # Logic for LRT
-
-    loss_unrestricted = training_results.final_loss
-
-    loss_differences: list[Optional[float]] = []
-    for _, row in tqdm(param_df.iterrows()):
-        if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
-            loss_differences.append(None)
-        else:
-            model_restricted = Pol2Model(feature_names=feature_names, intron_names=gene_data.intron_names).to(device)
-            model_restricted.load_state_dict(model.state_dict())
-
-            model_restricted.set_parameter_mask(param_name=row['parameter_type'],
-                                                feature_name=row['feature_name'],
-                                                intron_name=None if row['parameter_type'] == 'alpha' else row[
-                                                    'intron_name'],
-                                                value=0.0)
-            model_restricted, training_results = train_model(gene_data=gene_data,
-                                                             dataset_metadata=dataset_metadata,
-                                                             pol_2_total_loss=pol_2_total_loss,
-                                                             device=device,
-                                                             model=model_restricted)
-            if training_results.converged_within_max_epochs:
-                loss_differences.append(training_results.final_loss - loss_unrestricted)
-            else:
-                loss_differences.append(None)
-
-            if training_results.final_loss > 1e6:
-                assert False, 'Model diverged'
-                break
-
-    param_df['loss_unrestricted'] = loss_unrestricted
-    param_df['loss_differences'] = loss_differences
-    param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
-    param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
+    all_results: list[pd.DataFrame] = []
+    for gene_data in tqdm(gene_data_list):
+        all_results.append(get_results_for_gene(gene_data=gene_data,
+                                                dataset_metadata=dataset_metadata,
+                                                perform_lrt=True))
+    df_all = pd.concat(all_results).reset_index(drop=True)

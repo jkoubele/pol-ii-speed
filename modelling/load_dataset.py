@@ -142,8 +142,8 @@ def load_dataset(results_folder: Path,
                                           'reason': list(ignored_genes.values())})
     ignored_introns_df = pd.DataFrame(data={'intron': list(ignored_introns.keys()),
                                             'reason': list(ignored_introns.values())})
-    ignored_genes_df.to_csv(log_output_folder / 'ignored_genes.csv')
-    ignored_introns_df.to_csv(log_output_folder / 'ignored_introns.csv')
+    ignored_genes_df.to_csv(log_output_folder / 'ignored_genes.csv', index=False)
+    ignored_introns_df.to_csv(log_output_folder / 'ignored_introns.csv', index=False)
 
     return gene_data_list, dataset_metadata
 
