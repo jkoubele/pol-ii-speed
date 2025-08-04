@@ -19,11 +19,20 @@ if (!dir.exists(output_folder)) {
 }
 
 gtf_df <- readGFF(args$gtf_file)
+
+gene_type_column <- if ("gene_biotype" %in% names(gtf_df)) {
+  "gene_biotype"
+} else if ("gene_type" %in% names(gtf_df)) {
+  "gene_type"
+} else {
+  stop("Neither 'gene_biotype' nor 'gene_type' column found in the GTF attributes.")
+}
+
 all_genes <- gtf_df |>
   dplyr::filter(type == "gene") |>
   dplyr::distinct()
 protein_coding_genes <- all_genes |>
-  dplyr::filter(gene_biotype == 'protein_coding') |>
+  dplyr::filter(!!sym(gene_type_column) == 'protein_coding') |>
   dplyr::select(gene_id)
 
 readr::write_csv(all_genes |>  dplyr::select(gene_id), file.path(output_folder, "all_genes.csv"))

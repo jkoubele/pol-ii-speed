@@ -1,6 +1,6 @@
 outdir: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX369/dev_pol_ii_output/"
 
-samplesheet: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/samplesheet.csv"
+samplesheet: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX369/samplesheet.csv"
 fastq_dir: "/cellfile/datapublic/crc1678/data/A01_Müller/NephroLab_DEX369/FASTQ/"
 
 gtf_file: "/cellfile/datapublic/pungerav/global_data/genomes/homo_sapiens/GENCODE_GRCh38p14_genome/gencode.v47.chr_patch_hapl_scaff.annotation.gtf"
@@ -13,6 +13,6 @@ gtf_source: "gencode"
 #transcriptome_fasta: "/cellfile/datapublic/crc1678/annotations/genome_assemblies/human/hg38/Homo_sapiens.GRCh38.cdna.all.fa"
 #gtf_source: "ensembl"
 
-star_index: null
-salmon_index: null
+star_index: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/dev_pol_ii_output/STAR_index/star_index/"
+salmon_index: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/dev_pol_ii_output/salmon_index/salmon_index/"
 salmon_index_with_decoy: false
