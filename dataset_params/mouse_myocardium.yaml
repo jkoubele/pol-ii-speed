@@ -1,0 +1,14 @@
+outdir: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results"
+
+
+samplesheet: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/samplesheet.csv"
+fastq_dir: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ"
+
+gtf_file: "/cellfile/datapublic/jkoubele/reference_genomes/GRCm39/Mus_musculus.GRCm39.112.gtf"
+genome_fasta: "/cellfile/datapublic/jkoubele/reference_genomes/GRCm39/Mus_musculus.GRCm39.dna.primary_assembly.fa"
+transcriptome_fasta: "/cellfile/datapublic/jkoubele/reference_genomes/GRCm39/transcriptome/Mus_musculus.GRCm39.cdna.all.fa"
+gtf_source: "ensembl"
+
+star_index: null
+salmon_index: null
+salmon_index_with_decoy: false
