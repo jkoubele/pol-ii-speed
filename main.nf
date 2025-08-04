@@ -1,3 +1,7 @@
+def path_aggregated_counts = "${params.outdir}/aggregated_counts"
+def path_rescaled_coverage = "${params.outdir}/rescaled_coverage"
+def path_gene_names = "${params.outdir}/gene_names"
+
 
 process FastQC {
     container 'quay.io/biocontainers/fastqc:0.12.1--hdfd78af_0'
@@ -67,7 +71,7 @@ process GetGeneIDsFromGTF {
     output:
     tuple path("all_genes.csv"), path("protein_coding_genes.csv"), emit: gene_name_files
 
-    publishDir "${params.outdir}/gene_names", mode: 'copy'
+    publishDir path_gene_names, mode: 'copy'
 
     script:
     """
@@ -344,7 +348,7 @@ process RescaleCoverage {
     output:
         tuple val(sample), path("${sample}.parquet"), emit: coverage_parquet_file
 
-    publishDir "${params.outdir}/rescaled_coverage", mode: 'copy'
+    publishDir path_rescaled_coverage, mode: 'copy'
 
     tag "$sample"
 
@@ -367,7 +371,7 @@ process AggregateReadCounts {
     output:
     path("*.tsv"), emit: aggregated_counts
 
-    publishDir "${params.outdir}/aggregated_counts", mode: 'copy'
+    publishDir path_aggregated_counts, mode: 'copy'
 
     script:
     """
@@ -380,95 +384,109 @@ process AggregateReadCounts {
 }
 
 
-workflow {
+workflow preprocessing_workflow {
+    take:
+        samplesheet
+        fastq_dir
+        gtf_file
+        genome_fasta
+        transcriptome_fasta
+        gtf_source
+        star_index = null
+        salmon_index = null
+
+    main:
+        def gtf_channel = Channel.value(file(gtf_file))
+        def genome_fasta_channel = Channel.value(file(genome_fasta))
+        def transcriptome_fasta_channel = Channel.value(file(transcriptome_fasta))
+
+        def star_index_channel
+        if (star_index) {
+            log.info "Using provided STAR index: ${star_index}"
+            star_index_channel = Channel.value(file(star_index))
+        } else {
+            log.info "No STAR index provided. Building from genome FASTA and GTF."
+            star_index_channel = BuildStarIndex(genome_fasta_channel, gtf_channel).star_index_dir
+        }
+
+        def salmon_index_channel
+        if (params.salmon_index) {
+            log.info "Using provided Salmon index: ${params.salmon_index}"
+            salmon_index_channel = Channel.value(file(params.salmon_index))
+        } else {
+            log.info "No Salmon index provided. Building from transcriptome FASTA."
+            salmon_index_channel = BuildSalmonIndex(transcriptome_fasta_channel, genome_fasta_channel, gtf_channel).salmon_index_dir
+        }
+
+        samples = Channel
+            .fromPath(params.samplesheet)
+            .splitCsv(header: true)
+            .map { row ->
+                def sample      = row.sample
+                def fq1         = file("${params.fastq_dir}/${row.fastq_1}")
+                def fq2         = file("${params.fastq_dir}/${row.fastq_2}")
+                def strand      = row.strandedness
+
+                if (!fq1.exists()) error "FASTQ file not found: ${fq1}"
+                if (!fq2.exists()) error "FASTQ file not found: ${fq2}"
+                if (!['forward', 'reverse'].contains(strand)) {
+                    error "Invalid strandedness '${strand}' for sample '${sample}'"
+                }
+
+                tuple(sample, fq1, fq2, strand)
+            }
+
+        def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel).introns_bed_file
+        def tx2gene_out = PrepareTx2Gene(gtf_channel)
+        def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
+
+        gtf_channel| GetGeneIDsFromGTF
+
+        def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
+        def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
+        fastqc_out_aggregated | MultiQC
+
+        def aligned_bams = samples
+        .combine(star_index_channel)
+        .map { sample, r1, r2, strand, star_index ->
+            tuple(sample, r1, r2, star_index)
+        } | STARAlign
+
+       def extracted_intronic_reads = aligned_bams.star_bam
+       .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
+       .combine(introns_bed_channel)
+       | ExtractIntronicReads
+
+       def exonic_fastq = samples
+       .map { sample, r1, r2, strand -> tuple(sample, r1, r2) }
+       .join(extracted_intronic_reads.intronic_bam_files)
+       | RemoveIntronicReadsFromFASTQ
+
+       def salmon_quant_out = exonic_fastq.exonic_fastq
+       .combine(salmon_index_channel) | SalmonQuantification
+
+       def bed_graph_coverage = extracted_intronic_reads.intronic_bed_files
+       .combine(fai_index)| ComputeCoverage
+
+       def rescaled_coverage = bed_graph_coverage.bed_graph_files
+       .combine(introns_bed_channel)| RescaleCoverage
+
+        salmon_quant_out.salmon_quant
+        .join(extracted_intronic_reads.intron_read_counts)
+        .collect(flat: false).map { list_of_tuples ->
+            def sample_names = list_of_tuples*.getAt(0)
+            def quant_files  = list_of_tuples*.getAt(1)
+            def intron_files = list_of_tuples*.getAt(2)
+            tuple(sample_names, quant_files, intron_files)
+        }
+        .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
+
+}
+
+workflow{
 
     if (!params.samplesheet || !params.fastq_dir || !params.gtf_file || !params.genome_fasta || !params.transcriptome_fasta || !params.gtf_source) {
         error "Missing required parameters! Please run with -params-file <your_params.yaml>."
     }
-
-    def gtf_channel = Channel.value(file(params.gtf_file))
-    def genome_fasta_channel = Channel.value(file(params.genome_fasta))
-    def transcriptome_fasta_channel = Channel.value(file(params.transcriptome_fasta))
-
-    def star_index_channel
-    if (params.star_index) {
-        log.info "Using provided STAR index: ${params.star_index}"
-        star_index_channel = Channel.value(file(params.star_index))
-    } else {
-        log.info "No STAR index provided. Building from genome FASTA and GTF."
-        star_index_channel = BuildStarIndex(genome_fasta_channel, gtf_channel).star_index_dir
-    }
-
-    def salmon_index_channel
-    if (params.salmon_index) {
-        log.info "Using provided Salmon index: ${params.salmon_index}"
-        salmon_index_channel = Channel.value(file(params.salmon_index))
-    } else {
-        log.info "No Salmon index provided. Building from transcriptome FASTA."
-        salmon_index_channel = BuildSalmonIndex(transcriptome_fasta_channel, genome_fasta_channel, gtf_channel).salmon_index_dir
-    }
-
-    samples = Channel
-        .fromPath(params.samplesheet)
-        .splitCsv(header: true)
-        .map { row ->
-            def sample      = row.sample
-            def fq1         = file("${params.fastq_dir}/${row.fastq_1}")
-            def fq2         = file("${params.fastq_dir}/${row.fastq_2}")
-            def strand      = row.strandedness
-
-            if (!fq1.exists()) error "FASTQ file not found: ${fq1}"
-            if (!fq2.exists()) error "FASTQ file not found: ${fq2}"
-            if (!['forward', 'reverse'].contains(strand)) {
-                error "Invalid strandedness '${strand}' for sample '${sample}'"
-            }
-
-            tuple(sample, fq1, fq2, strand)
-        }
-
-    def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel).introns_bed_file
-    def tx2gene_out = PrepareTx2Gene(gtf_channel)
-    def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
-
-    gtf_channel| GetGeneIDsFromGTF
-
-    def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
-    def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
-    fastqc_out_aggregated | MultiQC
-
-    def aligned_bams = samples
-    .combine(star_index_channel)
-    .map { sample, r1, r2, strand, star_index ->
-        tuple(sample, r1, r2, star_index)
-    } | STARAlign
-
-   def extracted_intronic_reads = aligned_bams.star_bam
-   .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
-   .combine(introns_bed_channel)
-   | ExtractIntronicReads
-
-   def exonic_fastq = samples
-   .map { sample, r1, r2, strand -> tuple(sample, r1, r2) }
-   .join(extracted_intronic_reads.intronic_bam_files)
-   | RemoveIntronicReadsFromFASTQ
-
-   def salmon_quant_out = exonic_fastq.exonic_fastq
-   .combine(salmon_index_channel) | SalmonQuantification
-
-   def bed_graph_coverage = extracted_intronic_reads.intronic_bed_files
-   .combine(fai_index)| ComputeCoverage
-
-   def rescaled_coverage = bed_graph_coverage.bed_graph_files
-   .combine(introns_bed_channel)| RescaleCoverage
-
-    salmon_quant_out.salmon_quant
-    .join(extracted_intronic_reads.intron_read_counts)
-    .collect(flat: false).map { list_of_tuples ->
-        def sample_names = list_of_tuples*.getAt(0)
-        def quant_files  = list_of_tuples*.getAt(1)
-        def intron_files = list_of_tuples*.getAt(2)
-        tuple(sample_names, quant_files, intron_files)
-    }
-    .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
-
+    // Run preprocessing workflow
 }
