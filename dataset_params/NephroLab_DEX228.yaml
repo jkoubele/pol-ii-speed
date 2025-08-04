@@ -16,3 +16,5 @@ gtf_source: "gencode"
 star_index: null
 salmon_index: null
 salmon_index_with_decoy: false
+
+stage: 'all' # one of ['preprocess', 'model', 'all']

@@ -16,3 +16,5 @@ gtf_source: "gencode"
 star_index: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/dev_pol_ii_output/STAR_index/star_index/"
 salmon_index: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/dev_pol_ii_output/salmon_index/salmon_index/"
 salmon_index_with_decoy: false
+
+stage: 'all' # one of ['preprocess', 'model', 'all']

@@ -63,12 +63,11 @@ process GetGeneIDsFromGTF {
 
     input:
     path gtf
-    path path_gene_names
 
     output:
     tuple path("all_genes.csv"), path("protein_coding_genes.csv"), emit: gene_name_files
 
-    publishDir path_gene_names, mode: 'copy'
+    publishDir "${params.outdir}/gene_names", mode: 'copy'
 
     script:
     """
@@ -343,12 +342,12 @@ process RescaleCoverage {
 
     input:
         tuple val(sample), path(bedgraph_file_plus), path(bedgraph_file_minus), path(introns_bed_file)
-        path path_rescaled_coverage
+
 
     output:
         tuple val(sample), path("${sample}.parquet"), emit: coverage_parquet_file
 
-    publishDir path_rescaled_coverage, mode: 'copy'
+    publishDir "${params.outdir}/rescaled_coverage", mode: 'copy'
 
     tag "$sample"
 
@@ -367,12 +366,11 @@ process AggregateReadCounts {
 
     input:
     tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene)
-    path path_aggregated_counts
 
     output:
     path("*.tsv"), emit: aggregated_counts
 
-    publishDir path_aggregated_counts, mode: 'copy'
+    publishDir "${params.outdir}/aggregated_counts", mode: 'copy'
 
     script:
     """
@@ -396,10 +394,6 @@ workflow preprocessing_workflow {
         salmon_index_with_decoy
         star_index
         salmon_index
-        path_aggregated_counts
-        path_rescaled_coverage
-        path_gene_names
-
 
     main:
         def gtf_channel = Channel.value(file(gtf_file))
@@ -451,7 +445,7 @@ workflow preprocessing_workflow {
         def tx2gene_out = PrepareTx2Gene(gtf_channel)
         def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
-        GetGeneIDsFromGTF(gtf_channel, Channel.value(file(path_gene_names)))
+        GetGeneIDsFromGTF(gtf_channel)
 
         def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
         def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
@@ -480,7 +474,7 @@ workflow preprocessing_workflow {
        .combine(fai_index)| ComputeCoverage
 
        def rescaled_coverage = bed_graph_coverage.bed_graph_files
-       .combine(introns_bed_channel)| RescaleCoverage(Channel.value(file(path_rescaled_coverage)))
+       .combine(introns_bed_channel)| RescaleCoverage
 
         salmon_quant_out.salmon_quant
         .join(extracted_intronic_reads.intron_read_counts)
@@ -490,6 +484,6 @@ workflow preprocessing_workflow {
             def intron_files = list_of_tuples*.getAt(2)
             tuple(sample_names, quant_files, intron_files)
         }
-        .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts(Channel.value(file(path_aggregated_counts)))
+        .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
 
 }
