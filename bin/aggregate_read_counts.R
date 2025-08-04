@@ -35,7 +35,7 @@ names(exon_quant_files) <- args$sample_names
 txi <- tximport(exon_quant_files,
                 type = "salmon",
                 tx2gene = tx2gene,
-                ignoreTxVersion = FALSE,
+                ignoreTxVersion = TRUE,
                 countsFromAbundance = 'scaledTPM')
 
 exon_read_counts <- as.data.frame(txi$counts) |>
