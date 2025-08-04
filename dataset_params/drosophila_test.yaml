@@ -1,3 +1,5 @@
+outdir: "./results"
+
 samplesheet: "/cellfile/datapublic/jkoubele/example_pipeline/samplesheet.csv"
 fastq_dir: "/cellfile/datapublic/jkoubele/example_pipeline/subsample"
 
@@ -9,3 +11,7 @@ gtf_source: "ensembl"
 star_index: null
 salmon_index: null
 salmon_index_with_decoy: true
+
+design_formula: "~age+genotype"
+
+stage: 'all' # one of ['preprocess', 'model', 'all']

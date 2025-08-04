@@ -8,23 +8,25 @@ from scipy import stats
 
 from load_dataset import load_dataset
 
+results_folder = Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results')
 gene_data_list, dataset_metadata = load_dataset(
-    results_folder=Path('/home/jakub/Desktop/drosophila_mutants/results'),
+    results_folder=results_folder,
     gene_file_name='protein_coding_genes.csv',
-    log_output_folder=Path('/home/jakub/Desktop/drosophila_mutants/results/model_results'))
+    log_output_folder=Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results/model_results/'))
 
 # %%
-introns_df = pd.read_csv('/home/jakub/Desktop/drosophila_mutants/results/extracted_introns/introns.bed',
+introns_df = pd.read_csv(results_folder / 'extracted_introns/introns.bed',
                          sep='\t',
                          names=['chromosome', 'start', 'end', 'name', 'score', 'strand']).set_index('name')
 
 
-gene_of_interest = 'FBgn0019985'
-intron_of_interest = 'FBgn0019985_9'
-gene_data = [x for x in gene_data_list if x.gene_name == gene_of_interest][0]
+# gene_of_interest = 'FBgn0019985'
+# intron_of_interest = 'FBgn0019985_9'
+# gene_data = [x for x in gene_data_list if x.gene_name == gene_of_interest][0]
 
-intron_index = gene_data.intron_names.index(intron_of_interest)
-# gene_data = gene_data_list[10]
+# intron_index = gene_data.intron_names.index(intron_of_interest)
+gene_data = gene_data_list[0]
+intron_index = 0
 
 intron_data = gene_data.coverage[:, intron_index, :]
 intron_name = gene_data.intron_names[intron_index]
