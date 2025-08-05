@@ -33,8 +33,8 @@ if __name__ == "__main__":
                         help='Path to the folder with .parquet files with intron coverage.')
 
     args = parser.parse_args()
-
-    design_matrix_df = pd.read_csv(args.design_matrix)
+    
+    print(f"{args=}")
 
     design_matrix_df = pd.read_csv(args.design_matrix)
     gene_names_df = pd.read_csv(args.gene_names)
