@@ -46,17 +46,21 @@ process RunModel {
     container 'bioinfo_tools'
 
     input:
-    path design_matrix
-    path gene_names
-    path exon_counts_matrix
-    path intron_counts_matrix
-    path library_size_factors
-    path coverage_parquet_files
+    tuple (
+        path(gene_names),
+        val(chunk_name),
+        path(design_matrix),
+        path(exon_counts_matrix),
+        path(intron_counts_matrix),
+        path(library_size_factors),
+        path(coverage_parquet_files)
+    )
+
 
     output:
     path("success.txt"), emit: success_message
 
-    publishDir "${params.outdir}/model_results", mode: 'copy'
+    publishDir "${params.outdir}/model_results/${chunk_name}", mode: 'copy'
 
     script:
     """
@@ -89,15 +93,17 @@ workflow modeling_workflow {
         def design_matrix_channel = CreateDesignMatrix(samplesheet_channel, design_formula, factor_reference_channel)
 
         gene_names_split = SplitGeneNames(gene_names_file)
-        gene_names_split.gene_names_chunks | view
 
+        def model_input = gene_names_split.gene_names_chunks
+            .flatten()
+            .map{ file -> tuple(file, file.baseName)}
+            .combine(design_matrix_channel.design_matrix)
+            .combine(exon_counts)
+            .combine(intron_counts)
+            .combine(library_size_factors)
+            // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
+            .combine(coverage_files.map { file_list -> tuple([file_list]) })
 
-        def model_results = RunModel(
-            design_matrix_channel.design_matrix,
-            gene_names_file,
-            exon_counts,
-            intron_counts,
-            library_size_factors,
-            coverage_files
-            )
+        model_input | RunModel
+
 }
