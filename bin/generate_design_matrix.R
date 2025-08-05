@@ -16,16 +16,6 @@ parser$add_argument("--output_folder",
                     help = "",
                     default = '.')
 
-
-# args <- parser$parse_args(
-#   c(
-#   "--samplesheet", "/cellfile/datapublic/jkoubele/example_pipeline/samplesheet.csv",
-#   "--formula", "~ age + genotype",
-#   "--output_folder", "/cellfile/datapublic/jkoubele/drosophila_mutants/results/experiment_design",
-#   "--factor_references", "/cellfile/datapublic/jkoubele/drosophila_mutants/factor_references.csv"
-#   )
-# )
-
 args <- parser$parse_args()
 
 output_folder <- args$output_folder

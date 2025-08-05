@@ -1,5 +1,5 @@
 include { preprocessing_workflow } from './workflows/preprocessing.nf'
-
+include { modeling_workflow } from './workflows/modeling.nf'
 
 workflow{
     if (!['preprocess', 'model', 'all'].contains(params.stage)){
@@ -36,7 +36,15 @@ workflow{
     }
 
     if (['model', 'all'].contains(params.stage)) {
-        // Modeling workflow will go here
+        modeling_workflow(
+        params.samplesheet,
+        null,
+        null,
+        null,
+        null,
+        null,
+        params.design_formula,
+        params.factor_reference_levels)
     }
 }
 
