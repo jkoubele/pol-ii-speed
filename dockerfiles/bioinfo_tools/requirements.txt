@@ -5,6 +5,7 @@ iranges==0.2.6
 pandas==2.0.3
 pybedtools==0.10.0
 git+https://github.com/taschini/pycrlibm.git@e9e8a7df0517c1d83d9b8c25a7b00ea1f4ef739f
+pyarrow==21.0.0
 pyinterval==1.2.0
 pysam==0.21.0
 scipy==1.11.1

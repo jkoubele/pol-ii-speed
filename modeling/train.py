@@ -11,8 +11,8 @@ from torch import optim
 from torch.func import functional_call, hessian
 from tqdm import tqdm
 
-from load_dataset import load_dataset_from_results_folder
-from pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
+from modeling.load_dataset import load_dataset_from_results_folder
+from modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 
 
 @dataclass

@@ -38,7 +38,7 @@ process SplitGeneNames {
     split_gene_names.R \
     --input_gene_names $gene_names \
     --output_folder . \
-    --chunk_size 1000
+    --chunk_size 100
     """
 }
 
@@ -66,7 +66,7 @@ process RunModel {
     script:
     """
     export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
-    test_load_dataset.py \
+    run_model.py \
     --design_matrix $design_matrix \
     --gene_names $gene_names \
     --exon_counts $exon_counts_matrix \
