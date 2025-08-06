@@ -54,7 +54,7 @@ workflow{
 
         }
         if(params.stage=='all'){
-            // handle passing of data emmited from preprocessing workflow
+            // TODO: handle passing of data emmited from preprocessing workflow
         }
 
         modeling_workflow(

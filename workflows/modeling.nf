@@ -1,3 +1,4 @@
+def model_run_id = "model_run_" + new Date().format("yyyy_dd_MM_HH_mm_ss") // Used as name of model results directory
 
 process CreateDesignMatrix {
     container 'pol_ii_bioconductor'
@@ -58,9 +59,9 @@ process RunModel {
 
 
     output:
-    path("success.txt"), emit: success_message
+    path("model_results_*.csv"), emit: model_result_chunks
 
-    publishDir "${params.outdir}/model_results/${chunk_name}", mode: 'copy'
+    publishDir "${params.outdir}/chunk_model_results/${chunk_name}", mode: 'copy'
 
     script:
     """
@@ -70,8 +71,36 @@ process RunModel {
     --exon_counts $exon_counts_matrix \
     --intron_counts $intron_counts_matrix \
     --library_size_factors $library_size_factors \
-    --coverage_data_folder .
+    --coverage_data_folder . \
+    --output_folder . \
+    --output_basename model_results_${chunk_name}
     """
+
+}
+
+process MergeModelResultChunks {
+    container 'pol_ii_bioconductor'
+
+    input:
+    path model_result_chunks
+    val design_formula
+
+    output:
+    path("model_results.csv"), emit: model_results
+    path ("design_formula.txt")
+
+    publishDir "${params.outdir}/model_results/${model_run_id}", mode: 'copy'
+
+    script:
+    """
+    merge_model_result_chunks.R \
+    --input_folder . \
+    --output_folder . \
+    --output_file_name model_results.csv
+
+    echo ${design_formula} > design_formula.txt
+    """
+
 
 }
 
@@ -90,7 +119,11 @@ workflow modeling_workflow {
     main:
         def samplesheet_channel = Channel.value(file(samplesheet))
         def factor_reference_channel = factor_reference_levels ? Channel.value(file(factor_reference_levels)) : Channel.value([])
-        def design_matrix_channel = CreateDesignMatrix(samplesheet_channel, design_formula, factor_reference_channel)
+
+
+        def design_matrix_channel = CreateDesignMatrix(samplesheet_channel,
+                                                       design_formula,
+                                                       factor_reference_channel)
 
         gene_names_split = SplitGeneNames(gene_names_file)
 
@@ -104,6 +137,8 @@ workflow modeling_workflow {
             // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
             .combine(coverage_files.map { file_list -> tuple([file_list]) })
 
-        model_input | RunModel
+        model_result_chunks = RunModel(model_input).model_result_chunks
+        collected_results_chunks = model_result_chunks.collect()
+        MergeModelResultChunks(collected_results_chunks, design_formula)
 
 }
