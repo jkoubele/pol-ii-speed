@@ -2,7 +2,7 @@
 
 import argparse
 from pathlib import Path
-import sys
+from modeling.load_dataset import load_dataset_matedata
 
 import pandas as pd
 
@@ -35,12 +35,13 @@ if __name__ == "__main__":
     parser.add_argument('--output_folder',
                         type=Path,
                         default=Path('.'),
-                        help='Basename of the output csv file.')
+                        help='Output folder.')
     parser.add_argument('--output_basename',
                         type=str,
                         default='model_results',
                         help='Basename of the output csv file.')
     # For development
+    # import sys
     # sys.argv = [
     #         'script_name.py',
     #         '--design_matrix', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/design_matrix/design_matrix.csv',
@@ -54,8 +55,11 @@ if __name__ == "__main__":
     #     ]
 
     args = parser.parse_args()    
+    
     output_folder = args.output_folder
-    output_folder.mkdir(exist_ok=True, parents=True)
+    output_folder.mkdir(exist_ok=True, parents=True)    
+    dataset_matedata = load_dataset_matedata(design_matrix_file=args.design_matrix,
+                                             library_size_factors_file=args.library_size_factors)
 
     design_matrix_df = pd.read_csv(args.design_matrix)
     gene_names_df = pd.read_csv(args.gene_names)

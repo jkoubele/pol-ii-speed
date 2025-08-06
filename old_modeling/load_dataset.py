@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from modeling.pol_ii_model import GeneData, DatasetMetadata
+from modeling import GeneData, DatasetMetadata
 
 MIN_SAMPLES_WITH_NONZERO_READ_COUNT = 3
 
@@ -34,7 +34,7 @@ def load_dataset_matedata(design_matrix_file: Path,
     library_sizes = torch.tensor(design_matrix_df.pop('library_size_factor'),
                                  dtype=torch.float32)
     design_matrix_df = design_matrix_df.set_index('sample')
-
+    
     dataset_metadata = DatasetMetadata(design_matrix=torch.tensor(design_matrix_df.values, dtype=torch.float32),
                                        library_sizes=library_sizes,
                                        log_library_sizes=torch.log(library_sizes),
@@ -42,7 +42,7 @@ def load_dataset_matedata(design_matrix_file: Path,
                                        sample_names=design_matrix_df.index.tolist())
     return dataset_metadata
 
-
+ 
 def load_gene_data_list(gene_names_file: Path,
                         exon_counts_file: Path,
                         intron_counts_file: Path,
@@ -142,38 +142,41 @@ def load_gene_data_list(gene_names_file: Path,
                                             'reason': list(ignored_introns.values())})
     ignored_genes_df.to_csv(log_output_folder / 'ignored_genes.csv', index=False)
     ignored_introns_df.to_csv(log_output_folder / 'ignored_introns.csv', index=False)
-
+    
     return gene_data_list
-
+    
 
 def load_dataset_from_results_folder(results_folder: Path,
-                                     log_output_folder: Path,
-                                     gene_names_file_name='protein_coding_genes.csv') -> tuple[
-    list[GeneData], DatasetMetadata]:
+                                     log_output_folder: Path) -> tuple[list[GeneData], DatasetMetadata]:    
     design_matrix_file = results_folder / 'design_matrix' / 'design_matrix.csv'
-    library_size_factors_file = results_folder / 'aggregated_counts' / 'library_size_factors.tsv'
-
+    library_size_factors_file = results_folder / 'aggregated_counts' / 'library_size_factors.tsv' 
+    
     dataset_metadata = load_dataset_matedata(design_matrix_file, library_size_factors_file)
-
+    
     # Another function arguments
-    gene_names_file = results_folder / 'gene_names' / gene_names_file_name
+    log_output_folder = output_folder / 'logs'
+    gene_names_file = results_folder / 'gene_names' / 'protein_coding_genes.csv'
     exon_counts_file = results_folder / 'aggregated_counts' / 'exon_counts.tsv'
     intron_counts_file = results_folder / 'aggregated_counts' / 'intron_counts.tsv'
     coverage_folder = results_folder / 'rescaled_coverage'
-
+    
     gene_data_list = load_gene_data_list(gene_names_file=gene_names_file,
-                                         exon_counts_file=exon_counts_file,
-                                         intron_counts_file=intron_counts_file,
-                                         coverage_folder=coverage_folder,
-                                         sample_names=dataset_metadata.sample_names,
-                                         log_output_folder=log_output_folder
-                                         )
-
+                        exon_counts_file=exon_counts_file, 
+                        intron_counts_file=intron_counts_file, 
+                        coverage_folder=coverage_folder,
+                        sample_names = dataset_metadata.sample_names,
+                        log_output_folder=log_output_folder                        
+                        )
+    
     return dataset_metadata, gene_data_list
+    
+    
+    
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
     results_folder = Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results')
-    output_folder = Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results/chunk_model_results/test_chunk')
-
-    dataset_metadata, gene_data_list = load_dataset_from_results_folder(results_folder, output_folder)
+    output_folder =  Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results/chunk_model_results/test_chunk')
+    
+    dataset_metadata, gene_data_list = load_dataset_from_results_folder(results_folder, output_folder)    
+   

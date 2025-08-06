@@ -11,7 +11,7 @@ from torch import optim
 from torch.func import functional_call, hessian
 from tqdm import tqdm
 
-from load_dataset import load_dataset
+from load_dataset import load_dataset_from_results_folder
 from pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 
 
@@ -243,16 +243,16 @@ def get_results_for_gene(gene_data: GeneData,
     return param_df
 
 
-if __name__ == "__main__":
-    gene_data_list, dataset_metadata = load_dataset(
-        results_folder=Path('/home/jakub/Desktop/drosophila_mutants/results'),
-        gene_file_name='test_subset_2.csv',  # test_subset.csv
-        log_output_folder=Path('/home/jakub/Desktop/drosophila_mutants/results/model_results'))
+if __name__ == "__main__":   
+    dataset_metadata, gene_data_list = load_dataset_from_results_folder(
+        results_folder=Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results'),        
+        log_output_folder=Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results/chunk_model_results/test_chunk/logs'),
+        gene_names_file_name='test_subset.csv')
 
-    device = 'cpu'
-    all_results: list[pd.DataFrame] = []
-    for gene_data in tqdm(gene_data_list):
-        all_results.append(get_results_for_gene(gene_data=gene_data,
-                                                dataset_metadata=dataset_metadata,
-                                                perform_lrt=True))
-    df_all = pd.concat(all_results).reset_index(drop=True)
+    # device = 'cpu'
+    # all_results: list[pd.DataFrame] = []
+    # for gene_data in tqdm(gene_data_list):
+    #     all_results.append(get_results_for_gene(gene_data=gene_data,
+    #                                             dataset_metadata=dataset_metadata,
+    #                                             perform_lrt=True))
+    # df_all = pd.concat(all_results).reset_index(drop=True)

@@ -65,6 +65,7 @@ process RunModel {
 
     script:
     """
+    export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
     test_load_dataset.py \
     --design_matrix $design_matrix \
     --gene_names $gene_names \

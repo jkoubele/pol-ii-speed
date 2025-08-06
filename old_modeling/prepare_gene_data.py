@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from pol_ii_model import GeneData
+from modeling import GeneData
 
 # Prepare toy Drosophila dataset
 project_path = Path('/cellfile/datapublic/jkoubele/data_pol_ii/drosophila_mutants')

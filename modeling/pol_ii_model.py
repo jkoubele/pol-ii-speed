@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import Optional
-import math
 
 import pandas as pd
 import torch
