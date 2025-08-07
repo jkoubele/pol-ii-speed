@@ -17,4 +17,7 @@ star_index: null
 salmon_index: null
 salmon_index_with_decoy: false
 
-stage: 'all' # one of ['preprocess', 'model', 'all']
+design_formula: "~genotype"
+factor_reference_levels: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/factor_references.csv" # Optional, can be left null
+
+stage: 'model' # one of ['preprocess', 'model', 'all']
