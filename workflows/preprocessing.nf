@@ -318,7 +318,7 @@ process RescaleCoverage {
 
 
     output:
-        tuple val(sample), path("${sample}.parquet"), emit: coverage_parquet_file
+    path("${sample}.parquet"), emit: coverage_parquet_file
 
     publishDir "${params.outdir}/rescaled_coverage", mode: 'copy'
 
@@ -449,21 +449,25 @@ workflow preprocessing_workflow {
        def rescaled_coverage = bed_graph_coverage.bed_graph_files
        .combine(introns_bed_channel)| RescaleCoverage
 
-        def data_aggregation =  salmon_quant_out.salmon_quant
-        .join(extracted_intronic_reads.intron_read_counts)
-        .collect(flat: false).map { list_of_tuples ->
+       def rescaled_coverage_combined = rescaled_coverage.combine()
+
+
+
+       def data_aggregation =  salmon_quant_out.salmon_quant
+       .join(extracted_intronic_reads.intron_read_counts)
+       .collect(flat: false).map { list_of_tuples ->
             def sample_names = list_of_tuples*.getAt(0)
             def quant_files  = list_of_tuples*.getAt(1)
             def intron_files = list_of_tuples*.getAt(2)
             tuple(sample_names, quant_files, intron_files)
-        }
-        .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
+       }
+       .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
 
     emit:
         gene_names_file        = gene_names.protein_coding_gene_names
         exon_counts            = data_aggregation.exon_counts
         intron_counts          = data_aggregation.intron_counts
         library_size_factors   = data_aggregation.library_size_factors
-        coverage_files         = rescaled_coverage.coverage_parquet_file
+        coverage_files         = rescaled_coverage_combined
 
 }
