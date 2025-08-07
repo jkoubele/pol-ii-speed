@@ -40,7 +40,7 @@ def train_model(gene_data: GeneData,
         model.initialize_intercepts(gene_data, dataset_metadata.library_sizes)
 
     optimizer = optim.LBFGS(model.parameters(),
-                            lr=0.01,
+                            lr=0.05,
                             max_iter=20,
                             tolerance_change=1e-09,
                             tolerance_grad=1e-07,
@@ -243,10 +243,11 @@ def get_results_for_gene(gene_data: GeneData,
     return param_df
 
 
-if __name__ == "__main__":   
+if __name__ == "__main__":
     dataset_metadata, gene_data_list = load_dataset_from_results_folder(
-        results_folder=Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results'),        
-        log_output_folder=Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results/chunk_model_results/test_chunk/logs'),
+        results_folder=Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results'),
+        log_output_folder=Path(
+            '/cellfile/datapublic/jkoubele/drosophila_mutants/results/chunk_model_results/test_chunk/logs'),
         gene_names_file_name='test_subset.csv')
 
     # device = 'cpu'
