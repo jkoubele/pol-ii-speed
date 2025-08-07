@@ -449,7 +449,7 @@ workflow preprocessing_workflow {
        def rescaled_coverage = bed_graph_coverage.bed_graph_files
        .combine(introns_bed_channel)| RescaleCoverage
 
-       def rescaled_coverage_combined = rescaled_coverage.combine()
+       def rescaled_coverage_combined = rescaled_coverage.collect()
 
 
 
