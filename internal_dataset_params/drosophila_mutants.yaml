@@ -12,7 +12,7 @@ star_index: null
 salmon_index: null
 salmon_index_with_decoy: true
 
-design_formula: "~genotype"
+design_formula: "~genotype+age"
 factor_reference_levels: "/cellfile/datapublic/jkoubele/drosophila_mutants/factor_references.csv" # Optional, can be left null
 
-stage: 'model' # one of ['preprocess', 'model', 'all']
+stage: 'all' # one of ['preprocess', 'model', 'all']

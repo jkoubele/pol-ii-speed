@@ -57,7 +57,8 @@ process GetGeneIDsFromGTF {
     path gtf
 
     output:
-    tuple path("all_genes.csv"), path("protein_coding_genes.csv"), emit: gene_name_files
+        path("protein_coding_genes.csv"), emit: protein_coding_gene_names
+        path("all_genes.csv")
 
     publishDir "${params.outdir}/gene_names", mode: 'copy'
 
@@ -191,7 +192,7 @@ process STARAlign {
       --quantMode GeneCounts \
       --peOverlapNbasesMin 10 \
       --outFileNamePrefix ${sample}. \
-      --limitBAMsortRAM 50000000000
+      --limitBAMsortRAM 60000000000
     """
 }
 
@@ -338,7 +339,9 @@ process AggregateReadCounts {
     tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene)
 
     output:
-    path("*.tsv"), emit: aggregated_counts
+        path("exon_counts.tsv"), emit: exon_counts
+        path("intron_counts.tsv"), emit: intron_counts
+        path("library_size_factors.tsv"), emit: library_size_factors
 
     publishDir "${params.outdir}/aggregated_counts", mode: 'copy'
 
@@ -415,7 +418,7 @@ workflow preprocessing_workflow {
         def tx2gene_out = PrepareTx2Gene(gtf_channel)
         def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
-        GetGeneIDsFromGTF(gtf_channel)
+        def gene_names = GetGeneIDsFromGTF(gtf_channel)
 
         def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
         def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
@@ -446,7 +449,7 @@ workflow preprocessing_workflow {
        def rescaled_coverage = bed_graph_coverage.bed_graph_files
        .combine(introns_bed_channel)| RescaleCoverage
 
-        salmon_quant_out.salmon_quant
+        def data_aggregation =  salmon_quant_out.salmon_quant
         .join(extracted_intronic_reads.intron_read_counts)
         .collect(flat: false).map { list_of_tuples ->
             def sample_names = list_of_tuples*.getAt(0)
@@ -455,5 +458,12 @@ workflow preprocessing_workflow {
             tuple(sample_names, quant_files, intron_files)
         }
         .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
+
+    emit:
+        gene_names_file        = gene_names.protein_coding_gene_names
+        exon_counts            = data_aggregation.exon_counts
+        intron_counts          = data_aggregation.intron_counts
+        library_size_factors   = data_aggregation.library_size_factors
+        coverage_files         = rescaled_coverage.coverage_parquet_file
 
 }

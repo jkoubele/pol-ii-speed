@@ -1,7 +1,11 @@
 include { preprocessing_workflow } from './workflows/preprocessing.nf'
 include { modeling_workflow } from './workflows/modeling.nf'
 
+
 workflow {
+
+    def preproc_out
+
     if (!['preprocess', 'model', 'all'].contains(params.stage)) {
         error("Invalid 'stage' value: ${params.stage}. Must be either 'preprocess', 'model' or 'all'.")
     }
@@ -16,7 +20,7 @@ workflow {
             error("Invalid 'gtf_source' value: ${params.gtf_source}. Must be 'ensembl' or 'gencode'.")
         }
 
-        preprocessing_workflow(
+        preproc_out = preprocessing_workflow(
             params.samplesheet,
             params.fastq_dir,
             params.gtf_file,
@@ -25,12 +29,11 @@ workflow {
             params.gtf_source,
             params.salmon_index_with_decoy,
             params.star_index,
-            params.salmon_index,
-        )
+            params.salmon_index)
     }
 
     if (['model', 'all'].contains(params.stage)) {
-
+        // Run modeling workflow
         def gene_names_file
         def exon_counts
         def intron_counts
@@ -46,6 +49,12 @@ workflow {
                 .collect()
         }
         if (params.stage == 'all') {
+
+            gene_names_file        = preproc_out.gene_names_file
+            exon_counts            = preproc_out.exon_counts
+            intron_counts          = preproc_out.intron_counts
+            library_size_factors   = preproc_out.library_size_factors
+            coverage_files         = preproc_out.coverage_files
         }
 
         modeling_workflow(

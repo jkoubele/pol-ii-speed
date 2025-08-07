@@ -146,19 +146,6 @@ class Pol2Model(nn.Module):
         reads_unspliced_transcripts = safe_exp(intron_gene_expression_term + splicing_term)
         predicted_reads_intron = reads_intronic_polymerases + reads_unspliced_transcripts
 
-        # Check for NaNs and Infs
-        # assert torch.all(torch.isfinite(predicted_log_reads_exon)), f"NaN or Inf in predicted_log_reads_exon: {predicted_log_reads_exon=}"
-        # assert torch.all(torch.isfinite(predicted_reads_intron)), "NaN or Inf in predicted_reads_intron"
-        # assert torch.all(torch.isfinite(phi)), "NaN or Inf in phi"
-        #
-        # # Check for suspiciously large values
-        # assert torch.all(predicted_log_reads_exon < 100), "Suspiciously large log exon prediction"
-        # assert torch.all(predicted_reads_intron < 1e12), "Suspiciously large intron prediction"
-        #
-        # # Check for negative predictions
-        # assert torch.all(predicted_reads_intron >= 0), "Negative predicted intron reads"
-        # assert torch.all(safe_exp(predicted_log_reads_exon) >= 0), "Negative predicted exon reads (after exp)"
-
         return safe_exp(predicted_log_reads_exon), predicted_reads_intron, phi
 
     def get_param_df(self) -> pd.DataFrame:
