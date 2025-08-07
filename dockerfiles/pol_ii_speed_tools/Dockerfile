@@ -1,4 +1,4 @@
-FROM debian:latest
+FROM debian:bookworm
 
 # Update and install system packages
 RUN apt update && apt upgrade -y && apt install -y \

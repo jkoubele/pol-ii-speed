@@ -5,13 +5,19 @@ import pandas as pd
 import torch
 from matplotlib import pyplot as plt
 from scipy import stats
+import sys
 
-from load_dataset import load_dataset
 
-results_folder = Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results')
-gene_data_list, dataset_metadata = load_dataset(
+from modeling.load_dataset import load_dataset_from_results_folder
+
+sys.path.insert(0, str(Path("/cellfile/datapublic/jkoubele/dev-pol-ii-analysis")))
+
+#%%
+
+results_folder = Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results/')
+gene_data_list, dataset_metadata = load_dataset_from_results_folder(
     results_folder=results_folder,
-    gene_file_name='protein_coding_genes.csv',
+    gene_names_file_name='protein_coding_genes.csv',
     log_output_folder=Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results/model_results/'))
 
 # %%

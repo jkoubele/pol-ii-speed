@@ -1,8 +1,6 @@
 def model_run_id = "model_run_" + new Date().format("yyyy_dd_MM_HH_mm_ss") // Used as name of model results directory
 
 process CreateDesignMatrix {
-    container 'pol_ii_bioconductor'
-
     input:
     path samplesheet
     val design_formula
@@ -23,8 +21,6 @@ process CreateDesignMatrix {
 }
 
 process SplitGeneNames {
-    container 'pol_ii_bioconductor'
-
     input:
     path gene_names
 
@@ -44,8 +40,6 @@ process SplitGeneNames {
 
 
 process RunModel {
-    container 'bioinfo_tools'
-
     input:
     tuple (
         path(gene_names),
@@ -80,8 +74,6 @@ process RunModel {
 }
 
 process MergeModelResultChunks {
-    container 'pol_ii_bioconductor'
-
     input:
     path model_result_chunks
     val design_formula
@@ -101,7 +93,6 @@ process MergeModelResultChunks {
 
     echo ${design_formula} > design_formula.txt
     """
-
 
 }
 

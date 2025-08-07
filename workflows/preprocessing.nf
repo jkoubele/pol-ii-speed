@@ -1,6 +1,4 @@
 process FastQC {
-    container 'quay.io/biocontainers/fastqc:0.12.1--hdfd78af_0'
-
     input:
     tuple val(sample), path(read1), path(read2)
 
@@ -20,8 +18,6 @@ process FastQC {
 }
 
 process MultiQC {
-    container 'multiqc/multiqc:latest'
-
     input:
     path zip_files
 
@@ -38,8 +34,6 @@ process MultiQC {
 }
 
 process ExtractIntronsFromGTF {
-    container 'bioinfo_tools'
-
     input:
     path gtf
     val gtf_source
@@ -59,8 +53,6 @@ process ExtractIntronsFromGTF {
 }
 
 process GetGeneIDsFromGTF {
-    container 'pol_ii_bioconductor'
-
     input:
     path gtf
 
@@ -77,8 +69,6 @@ process GetGeneIDsFromGTF {
 }
 
 process BuildStarIndex {
-    container 'bioinfo_tools'
-
     input:
     path fasta
     path gtf
@@ -102,8 +92,6 @@ process BuildStarIndex {
 }
 
 process BuildSalmonIndex {
-    container 'bioinfo_tools'
-
     input:
     path transcriptome_fasta
     path genome_fasta
@@ -150,8 +138,6 @@ process BuildSalmonIndex {
 }
 
 process PrepareTx2Gene {
-    container 'pol_ii_bioconductor'
-
     input:
     path gtf
 
@@ -167,8 +153,6 @@ process PrepareTx2Gene {
 }
 
 process CreateGenomeFastaIndex {
-    container 'bioinfo_tools'
-
     input:
     path genome_fasta
 
@@ -184,8 +168,6 @@ process CreateGenomeFastaIndex {
 }
 
 process STARAlign {
-    container 'bioinfo_tools'
-
     input:
         tuple val(sample), path(read1), path(read2), path(star_index)
 
@@ -209,13 +191,11 @@ process STARAlign {
       --quantMode GeneCounts \
       --peOverlapNbasesMin 10 \
       --outFileNamePrefix ${sample}. \
-      --limitBAMsortRAM 60000000000
+      --limitBAMsortRAM 50000000000
     """
 }
 
 process ExtractIntronicReads {
-    container 'bioinfo_tools'
-
     input:
         tuple val(sample), path(bam_file), val(strand), path(introns_bed_file)
 
@@ -249,8 +229,6 @@ process ExtractIntronicReads {
 }
 
 process RemoveIntronicReadsFromFASTQ {
-    container 'bioinfo_tools'
-
     input:
         tuple val(sample), path(read1), path(read2), path(bam_introns)
 
@@ -278,8 +256,6 @@ process RemoveIntronicReadsFromFASTQ {
 }
 
 process SalmonQuantification {
-    container 'bioinfo_tools'
-
     input:
         tuple val(sample), path(read1), path(read2), path(salmon_index)
 
@@ -305,8 +281,6 @@ process SalmonQuantification {
 }
 
 process ComputeCoverage {
-    container 'bioinfo_tools'
-
     input:
         tuple val(sample), path(bed_file_plus), path(bed_file_minus), path(genome_fai_file)
 
@@ -338,8 +312,6 @@ process ComputeCoverage {
 }
 
 process RescaleCoverage {
-    container 'pol_ii_bioconductor'
-
     input:
         tuple val(sample), path(bedgraph_file_plus), path(bedgraph_file_minus), path(introns_bed_file)
 
@@ -362,8 +334,6 @@ process RescaleCoverage {
 }
 
 process AggregateReadCounts {
-    container 'pol_ii_bioconductor'
-
     input:
     tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene)
 

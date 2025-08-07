@@ -1,25 +1,19 @@
 include { preprocessing_workflow } from './workflows/preprocessing.nf'
 include { modeling_workflow } from './workflows/modeling.nf'
 
-workflow{
-    if (!['preprocess', 'model', 'all'].contains(params.stage)){
-     error "Invalid 'stage' value: ${params.stage}. Must be either 'preprocess', 'model' or 'all'."
+workflow {
+    if (!['preprocess', 'model', 'all'].contains(params.stage)) {
+        error("Invalid 'stage' value: ${params.stage}. Must be either 'preprocess', 'model' or 'all'.")
     }
 
     if (['preprocess', 'all'].contains(params.stage)) {
         // Run pre-processing workflow
-        if (!params.samplesheet ||
-        !params.fastq_dir ||
-        !params.gtf_file ||
-        !params.genome_fasta ||
-        !params.transcriptome_fasta ||
-        params.salmon_index_with_decoy == null ||
-        !params.gtf_source) {
-            error "Missing required parameters! Please run with -params-file <your_params.yaml>."
+        if (!params.samplesheet || !params.fastq_dir || !params.gtf_file || !params.genome_fasta || !params.transcriptome_fasta || params.salmon_index_with_decoy == null || !params.gtf_source) {
+            error("Missing required parameters! Please run with -params-file <your_params.yaml>.")
         }
 
         if (!['ensembl', 'gencode'].contains(params.gtf_source)) {
-            error "Invalid 'gtf_source' value: ${params.gtf_source}. Must be 'ensembl' or 'gencode'."
+            error("Invalid 'gtf_source' value: ${params.gtf_source}. Must be 'ensembl' or 'gencode'.")
         }
 
         preprocessing_workflow(
@@ -31,8 +25,8 @@ workflow{
             params.gtf_source,
             params.salmon_index_with_decoy,
             params.star_index,
-            params.salmon_index)
-
+            params.salmon_index,
+        )
     }
 
     if (['model', 'all'].contains(params.stage)) {
@@ -43,18 +37,15 @@ workflow{
         def library_size_factors
         def coverage_files
 
-        if (params.stage=='model'){
+        if (params.stage == 'model') {
             gene_names_file = Channel.value(file("${params.outdir}/gene_names/protein_coding_genes.csv"))
             exon_counts = Channel.value(file("${params.outdir}/aggregated_counts/exon_counts.tsv"))
             intron_counts = Channel.value(file("${params.outdir}/aggregated_counts/intron_counts.tsv"))
             library_size_factors = Channel.value(file("${params.outdir}/aggregated_counts/library_size_factors.tsv"))
-            coverage_files =Channel
-                            .fromPath("${params.outdir}/rescaled_coverage/*.parquet")
-                            .collect()
-
+            coverage_files = Channel.fromPath("${params.outdir}/rescaled_coverage/*.parquet")
+                .collect()
         }
-        if(params.stage=='all'){
-            // TODO: handle passing of data emmited from preprocessing workflow
+        if (params.stage == 'all') {
         }
 
         modeling_workflow(
@@ -65,12 +56,7 @@ workflow{
             library_size_factors,
             coverage_files,
             params.design_formula,
-            params.factor_reference_levels
+            params.factor_reference_levels,
         )
     }
 }
-
-
-
-
-
