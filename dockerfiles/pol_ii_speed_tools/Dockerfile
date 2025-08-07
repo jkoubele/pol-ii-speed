@@ -7,17 +7,6 @@ RUN apt update && apt upgrade -y && apt install -y \
     libssl-dev libncurses5-dev libsqlite3-dev libreadline-dev libtk8.6 \
     libgdm-dev libdb4o-cil-dev libpcap-dev jq git cmake libgsl-dev
 
-# Download and install Atria
-RUN curl -L -O https://github.com/cihga39871/Atria/releases/download/v4.0.3/atria-4.0.3-linux-ubuntu22.tar.gz && \
-    tar -zxf atria-4.0.3-linux-ubuntu22.tar.gz && \
-    rm atria-4.0.3-linux-ubuntu22.tar.gz
-ENV PATH="/atria-4.0.3/bin:$PATH"
-
-# Download and install FastQC
-RUN curl -L -O https://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.12.1.zip && \
-    unzip fastqc_v0.12.1.zip && \
-    rm fastqc_v0.12.1.zip
-
 # Download and install featureCounts
 RUN curl -L -O https://sourceforge.net/projects/subread/files/subread-2.0.6/subread-2.0.6-Linux-x86_64.tar.gz && \
     tar -zxf subread-2.0.6-Linux-x86_64.tar.gz && \
@@ -37,15 +26,6 @@ RUN curl -L -O https://github.com/samtools/samtools/releases/download/1.20/samto
     rm samtools-1.20.tar.bz2 && \
     make -C /samtools-1.20 && \
     make -C /samtools-1.20 install
-
-# Install Python 3.11
-RUN curl -L -O https://www.python.org/ftp/python/3.11.9/Python-3.11.9.tgz && \
-    tar xzf Python-3.11.9.tgz && \
-    rm Python-3.11.9.tgz && \
-    cd Python-3.11.9 && \
-    ./configure --enable-optimizations && \
-    make -j 4 && \
-    make install
 
 # Install bedtools
 RUN curl -L -O https://github.com/arq5x/bedtools2/archive/refs/tags/v2.31.1.zip && \
@@ -67,7 +47,3 @@ RUN curl -L -O https://github.com/marbl/MashMap/archive/refs/tags/v3.1.3.tar.gz 
     cmake -S MashMap-3.1.3 -B MashMap-3.1.3/build -DCMAKE_BUILD_TYPE=Release && \
     cmake --build MashMap-3.1.3/build
 ENV PATH="/MashMap-3.1.3/build/bin:$PATH"
-
-# Install Python packages from requirements file
-COPY . .
-RUN pip3 install -r requirements.txt
