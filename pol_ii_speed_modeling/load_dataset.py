@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from modeling.pol_ii_model import GeneData, DatasetMetadata
+from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata
 
 MIN_SAMPLES_WITH_NONZERO_READ_COUNT = 3
 

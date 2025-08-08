@@ -3,8 +3,8 @@
 import argparse
 from pathlib import Path
 from tqdm import tqdm
-from modeling.load_dataset import load_dataset_matedata, load_gene_data_list
-from modeling.train import get_results_for_gene
+from pol_ii_speed_modeling.load_dataset import load_dataset_matedata, load_gene_data_list
+from pol_ii_speed_modeling.train import get_results_for_gene
 
 import pandas as pd
 

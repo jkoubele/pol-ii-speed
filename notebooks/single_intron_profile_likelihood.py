@@ -8,7 +8,7 @@ from scipy import stats
 import sys
 sys.path.insert(0, str(Path("/")))
 
-from modeling.load_dataset import load_dataset_from_results_folder
+from pol_ii_speed_modeling.load_dataset import load_dataset_from_results_folder
 
 
 
