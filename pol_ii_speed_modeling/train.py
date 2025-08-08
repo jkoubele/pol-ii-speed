@@ -27,7 +27,7 @@ class TrainingResults:
 def train_model(gene_data: GeneData,
                 dataset_metadata: DatasetMetadata,
                 pol_2_total_loss: Pol2TotalLoss,
-                device: str,
+                device='cpu',
                 max_epochs=200,
                 max_patience=5,
                 loss_change_tolerance=1e-6,
