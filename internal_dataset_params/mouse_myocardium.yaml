@@ -1,5 +1,5 @@
 outdir: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results"
-
+workDir: "/cellfile/datapublic/jkoubele/pol-ii-speed/workdirs/mouse_myocardium"
 
 samplesheet: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/samplesheet.csv"
 fastq_dir: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ"

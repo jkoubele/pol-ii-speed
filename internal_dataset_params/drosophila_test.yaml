@@ -1,4 +1,5 @@
-outdir: "./results"
+outdir: "cellfile/datapublic/jkoubele/drosophila_test/results"
+workDir: "/cellfile/datapublic/jkoubele/pol-ii-speed/workdirs/drosophila_test"
 
 samplesheet: "/cellfile/datapublic/jkoubele/example_pipeline/samplesheet.csv"
 fastq_dir: "/cellfile/datapublic/jkoubele/example_pipeline/subsample"

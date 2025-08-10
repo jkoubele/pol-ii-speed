@@ -1,4 +1,5 @@
 outdir: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/dev_pol_ii_output/"
+workDir: "/cellfile/datapublic/jkoubele/pol-ii-speed/workdirs/NephroLab_DEX228"
 
 samplesheet: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/samplesheet.csv"
 fastq_dir: "/cellfile/datapublic/crc1678/data/A01_Müller/NephroLab_DEX228/FASTQ/"

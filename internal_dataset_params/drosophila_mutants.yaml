@@ -1,4 +1,6 @@
 outdir: "/cellfile/datapublic/jkoubele/drosophila_mutants/results"
+workDir: "/cellfile/datapublic/jkoubele/pol-ii-speed/workdirs/drosophila_mutants"
+
 
 samplesheet: "/cellfile/datapublic/jkoubele/drosophila_mutants/samplesheet.csv"
 fastq_dir: "/cellfile/datapublic/jkoubele/drosophila_mutants/FASTQ"
