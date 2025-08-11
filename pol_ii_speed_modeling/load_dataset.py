@@ -148,14 +148,12 @@ def load_gene_data_list(gene_names_file: Path,
 
 def load_dataset_from_results_folder(results_folder: Path,
                                      log_output_folder: Path,
-                                     gene_names_file_name='protein_coding_genes.csv') -> tuple[
-    list[GeneData], DatasetMetadata]:
+                                     gene_names_file_name='protein_coding_genes.csv') \
+        -> tuple[DatasetMetadata, list[GeneData]]:
     design_matrix_file = results_folder / 'design_matrix' / 'design_matrix.csv'
     library_size_factors_file = results_folder / 'aggregated_counts' / 'library_size_factors.tsv'
 
     dataset_metadata = load_dataset_matedata(design_matrix_file, library_size_factors_file)
-
-    # Another function arguments
     gene_names_file = results_folder / 'gene_names' / gene_names_file_name
     exon_counts_file = results_folder / 'aggregated_counts' / 'exon_counts.tsv'
     intron_counts_file = results_folder / 'aggregated_counts' / 'intron_counts.tsv'
@@ -170,10 +168,3 @@ def load_dataset_from_results_folder(results_folder: Path,
                                          )
 
     return dataset_metadata, gene_data_list
-
-
-if __name__ == "__main__":
-    results_folder = Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results')
-    output_folder = Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results/chunk_model_results/test_chunk')
-
-    dataset_metadata, gene_data_list = load_dataset_from_results_folder(results_folder, output_folder)

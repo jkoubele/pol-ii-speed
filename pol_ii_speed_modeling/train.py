@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -9,9 +8,7 @@ import torch
 from scipy import stats
 from torch import optim
 from torch.func import functional_call, hessian
-from tqdm import tqdm
 
-from pol_ii_speed_modeling.load_dataset import load_dataset_from_results_folder
 from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 
 
@@ -241,19 +238,3 @@ def get_results_for_gene(gene_data: GeneData,
         param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
         param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
     return param_df
-
-
-if __name__ == "__main__":
-    dataset_metadata, gene_data_list = load_dataset_from_results_folder(
-        results_folder=Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results'),
-        log_output_folder=Path(
-            '/cellfile/datapublic/jkoubele/drosophila_mutants/results/chunk_model_results/test_chunk/logs'),
-        gene_names_file_name='test_subset.csv')
-
-    # device = 'cpu'
-    # all_results: list[pd.DataFrame] = []
-    # for gene_data in tqdm(gene_data_list):
-    #     all_results.append(get_results_for_gene(gene_data=gene_data,
-    #                                             dataset_metadata=dataset_metadata,
-    #                                             perform_lrt=True))
-    # df_all = pd.concat(all_results).reset_index(drop=True)
