@@ -51,6 +51,7 @@ process RunModel {
         path(coverage_parquet_files)
     )
 
+    stageInMode 'copy'
 
     output:
     path("model_results_*.csv"), emit: model_result_chunks
