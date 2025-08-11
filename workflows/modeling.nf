@@ -93,10 +93,11 @@ process MergeModelResultChunks {
     --output_folder . \
     --output_file_name model_results.csv
 
-    cat > model_parameters.txt <<EOF
-    design_formula: ${design_formula}
-    intron_specific_lfc: ${intron_specific_lfc}
-    EOF
+# Intentionally missing indent, so EOF works properly
+cat > model_parameters.txt <<EOF
+design_formula: ${design_formula}
+intron_specific_lfc: ${intron_specific_lfc}
+EOF
     """
 
 }
@@ -134,7 +135,8 @@ workflow modeling_workflow {
             .combine(library_size_factors)
             // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
             .combine(coverage_files.map { file_list -> tuple([file_list]) })
-            .combine(intron_specific_lfc)
+            // Raw intron_specific_lfc is bool and cannot be used in combine()
+            .combine(Channel.value(intron_specific_lfc))
 
         model_result_chunks = RunModel(model_input).model_result_chunks
         collected_results_chunks = model_result_chunks
