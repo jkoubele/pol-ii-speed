@@ -66,6 +66,7 @@ workflow {
             coverage_files,
             params.design_formula,
             params.factor_reference_levels,
+            params.intron_specific_lfc
         )
     }
 }

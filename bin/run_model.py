@@ -2,11 +2,22 @@
 
 import argparse
 from pathlib import Path
+
+import pandas as pd
 from tqdm import tqdm
+
 from pol_ii_speed_modeling.load_dataset import load_dataset_matedata, load_gene_data_list
 from pol_ii_speed_modeling.train import get_results_for_gene
 
-import pandas as pd
+
+def parse_bool_in_argparse(argument: str) -> bool:
+    if argument.lower() == 'true':
+        return True
+    elif argument.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError("Boolean value expected. Use either 'true' or 'false'.")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -34,6 +45,10 @@ if __name__ == "__main__":
                         type=Path,
                         required=True,
                         help='Path to the folder with .parquet files with intron coverage.')
+    parser.add_argument('--intron_specific_lfc',
+                        type=parse_bool_in_argparse,
+                        required=True,
+                        help='Whether to use intron-specific LFC (true or false).')
     parser.add_argument('--output_folder',
                         type=Path,
                         default=Path('.'),
@@ -52,6 +67,7 @@ if __name__ == "__main__":
     #         '--intron_counts', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/aggregated_counts/intron_counts.tsv',
     #         '--library_size_factors', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/aggregated_counts/library_size_factors.tsv',
     #         '--coverage_data_folder', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/rescaled_coverage',
+    #         '--intron_specific_lfc', 'false',
     #         '--output_folder', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/model_results',
     #         '--output_basename', 'chunk_001'
     #     ]
@@ -70,16 +86,28 @@ if __name__ == "__main__":
                                          sample_names=dataset_metadata.sample_names,
                                          log_output_folder=Path("./logs"))
 
-    all_results: list[pd.DataFrame] = []
-    for gene_data in tqdm(gene_data_list):
-        all_results.append(get_results_for_gene(gene_data=gene_data,
-                                                dataset_metadata=dataset_metadata,
-                                                perform_lrt=True))
-    df_out = pd.concat(all_results).reset_index(drop=True) if all_results else pd.DataFrame(
-        columns=['parameter_type', 'intron_name', 'feature_name', 'value', 'gene_name',
-                 'loss_unrestricted', 'SE', 'z_score', 'p_value_wald', 'identifiable',
-                 'loss_differences', 'loss_restricted', 'p_value_lrt'])
-    df_out.to_csv(output_folder / f"{args.output_basename}.csv", index=False)
+    result_list = [get_results_for_gene(gene_data=gene_data,
+                                        dataset_metadata=dataset_metadata,
+                                        perform_lrt=True,
+                                        intron_specific_lfc=args.intron_specific_lfc)
+                   for gene_data in tqdm(gene_data_list)]
+    if result_list:
+        df_out = pd.concat(result_list).reset_index(drop=True)
+        df_out.to_csv(output_folder / f"{args.output_basename}.csv", index=False)
+
+    # all_results: list[pd.DataFrame] = []
+    #
+    # for gene_data in tqdm(gene_data_list):
+    #     all_results.append(get_results_for_gene(gene_data=gene_data,
+    #                                             dataset_metadata=dataset_metadata,
+    #                                             perform_lrt=True,
+    #                                             intron_specific_lfc=False))
+    #
+    # df_out = pd.concat(all_results).reset_index(drop=True) if all_results else pd.DataFrame(
+    #     columns=['parameter_type', 'intron_name', 'feature_name', 'value', 'gene_name',
+    #              'loss_unrestricted', 'SE', 'z_score', 'p_value_wald', 'identifiable',
+    #              'loss_differences', 'loss_restricted', 'p_value_lrt'])
+    # df_out.to_csv(output_folder / f"{args.output_basename}.csv", index=False)
 
     # design_matrix_df = pd.read_csv(args.design_matrix)
     # gene_names_df = pd.read_csv(args.gene_names)

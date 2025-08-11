@@ -48,11 +48,12 @@ process RunModel {
         path(exon_counts_matrix),
         path(intron_counts_matrix),
         path(library_size_factors),
-        path(coverage_parquet_files)
+        path(coverage_parquet_files),
+        val(intron_specific_lfc)
     )
 
     output:
-    path("model_results_*.csv"), emit: model_result_chunks
+    path("model_results_*.csv"), optional: true, emit: model_result_chunks
 
     publishDir "${params.outdir}/chunk_model_results/${chunk_name}", mode: 'copy'
 
@@ -66,6 +67,7 @@ process RunModel {
     --intron_counts $intron_counts_matrix \
     --library_size_factors $library_size_factors \
     --coverage_data_folder . \
+    --intron_specific_lfc ${intron_specific_lfc} \
     --output_folder . \
     --output_basename model_results_${chunk_name}
     """
@@ -76,10 +78,11 @@ process MergeModelResultChunks {
     input:
     path model_result_chunks
     val design_formula
+    val intron_specific_lfc
 
     output:
     path("model_results.csv"), emit: model_results
-    path ("design_formula.txt")
+    path ("model_parameters.txt")
 
     publishDir "${params.outdir}/model_results/${model_run_id}", mode: 'copy'
 
@@ -90,7 +93,10 @@ process MergeModelResultChunks {
     --output_folder . \
     --output_file_name model_results.csv
 
-    echo ${design_formula} > design_formula.txt
+    cat > model_parameters.txt <<EOF
+    design_formula: ${design_formula}
+    intron_specific_lfc: ${intron_specific_lfc}
+    EOF
     """
 
 }
@@ -105,6 +111,7 @@ workflow modeling_workflow {
         coverage_files
         design_formula
         factor_reference_levels
+        intron_specific_lfc
 
 
     main:
@@ -127,9 +134,12 @@ workflow modeling_workflow {
             .combine(library_size_factors)
             // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
             .combine(coverage_files.map { file_list -> tuple([file_list]) })
+            .combine(intron_specific_lfc)
 
         model_result_chunks = RunModel(model_input).model_result_chunks
-        collected_results_chunks = model_result_chunks.collect()
-        MergeModelResultChunks(collected_results_chunks, design_formula)
+        collected_results_chunks = model_result_chunks
+                                   .filter { it != null }
+                                   .collect()
+        MergeModelResultChunks(collected_results_chunks, design_formula, intron_specific_lfc)
 
 }

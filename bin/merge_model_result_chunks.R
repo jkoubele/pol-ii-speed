@@ -34,6 +34,8 @@ if (length(input_files) == 0) {
 }
 
 merged_df <- sort(input_files) |>
-  map_dfr(read_csv)
+  map(read_csv) |>
+  keep(~ nrow(.x) > 0) |>
+  list_rbind()
 
 write_csv(merged_df, file.path(output_folder, args$output_file_name))

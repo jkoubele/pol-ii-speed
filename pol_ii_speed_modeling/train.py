@@ -29,11 +29,12 @@ def train_model(gene_data: GeneData,
                 max_patience=5,
                 loss_change_tolerance=1e-6,
                 model: Optional[Pol2Model] = None,
-                adam_steps=1
+                intron_specific_lfc=True
                 ) -> tuple[Pol2Model, TrainingResults]:
     if model is None:
         model = Pol2Model(feature_names=dataset_metadata.feature_names,
-                          intron_names=gene_data.intron_names).to(device)
+                          intron_names=gene_data.intron_names,
+                          intron_specific_lfc=intron_specific_lfc).to(device)
         model.initialize_intercepts(gene_data, dataset_metadata.library_sizes)
 
     optimizer = optim.LBFGS(model.parameters(),
@@ -183,7 +184,8 @@ def get_results_for_gene(gene_data: GeneData,
                          dataset_metadata: DatasetMetadata,
                          device='cpu',
                          perform_wald_test=True,
-                         perform_lrt=False) -> pd.DataFrame:
+                         perform_lrt=False,
+                         intron_specific_lfc=True) -> pd.DataFrame:
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
     pol_2_total_loss = Pol2TotalLoss().to(device)
@@ -191,7 +193,8 @@ def get_results_for_gene(gene_data: GeneData,
     model, training_results = train_model(gene_data=gene_data,
                                           dataset_metadata=dataset_metadata,
                                           pol_2_total_loss=pol_2_total_loss,
-                                          device=device)
+                                          device=device,
+                                          intron_specific_lfc=intron_specific_lfc)
 
     param_df = model.get_param_df()
     param_df['gene_name'] = gene_data.gene_name
@@ -215,20 +218,22 @@ def get_results_for_gene(gene_data: GeneData,
                 loss_differences.append(None)
             else:
                 model_restricted = Pol2Model(feature_names=dataset_metadata.feature_names,
-                                             intron_names=gene_data.intron_names).to(
-                    device)
+                                             intron_names=gene_data.intron_names,
+                                             intron_specific_lfc=intron_specific_lfc).to(device)
                 model_restricted.load_state_dict(model.state_dict())
 
-                model_restricted.set_parameter_mask(param_name=row['parameter_type'],
-                                                    feature_name=row['feature_name'],
-                                                    intron_name=None if row['parameter_type'] == 'alpha' else row[
-                                                        'intron_name'],
-                                                    value=0.0)
+                model_restricted.set_parameter_mask(
+                    param_name=row['parameter_type'],
+                    feature_name=row['feature_name'],
+                    intron_name=None if (not intron_specific_lfc or row['parameter_type'] == 'alpha') else row[
+                        'intron_name'],
+                    value=0.0)
                 model_restricted, training_results = train_model(gene_data=gene_data,
                                                                  dataset_metadata=dataset_metadata,
                                                                  pol_2_total_loss=pol_2_total_loss,
                                                                  device=device,
-                                                                 model=model_restricted)
+                                                                 model=model_restricted,
+                                                                 intron_specific_lfc=intron_specific_lfc)
                 if training_results.converged_within_max_epochs:
                     loss_differences.append(training_results.final_loss - loss_unrestricted)
                 else:

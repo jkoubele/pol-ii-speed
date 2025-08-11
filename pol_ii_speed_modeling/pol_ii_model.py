@@ -5,8 +5,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-EXP_INPUT_CLAMP = 40
-
 
 def safe_exp(x: torch.Tensor, output_threshold: float = 1e20) -> torch.Tensor:
     output_threshold_tensor = torch.tensor(output_threshold, dtype=x.dtype, device=x.device)
@@ -66,6 +64,7 @@ class Pol2Model(nn.Module):
     def __init__(self,
                  feature_names: list[str],
                  intron_names: list[str],
+                 intron_specific_lfc=True
                  ):
         super().__init__()
         self.feature_names = feature_names
@@ -77,8 +76,13 @@ class Pol2Model(nn.Module):
         self.alpha = nn.Parameter(torch.zeros(num_features))
         self.intercept_exon = nn.Parameter(torch.zeros(1))
 
-        self.beta = nn.Parameter(torch.zeros(num_features, num_introns))
-        self.gamma = nn.Parameter(torch.zeros(num_features, num_introns))
+        if intron_specific_lfc:
+            self.beta = nn.Parameter(torch.zeros(num_features, num_introns))
+            self.gamma = nn.Parameter(torch.zeros(num_features, num_introns))
+        else:
+            self.beta = nn.Parameter(torch.zeros(num_features, 1))
+            self.gamma = nn.Parameter(torch.zeros(num_features, 1))
+        self.intron_specific_lfc = intron_specific_lfc
 
         self.intercept_intron = nn.Parameter(torch.zeros(num_introns))
         self.log_phi_zero = nn.Parameter(torch.zeros(num_introns))
@@ -111,7 +115,14 @@ class Pol2Model(nn.Module):
         elif param_name in ('beta', 'gamma'):
             logical_mask = torch.ones_like(self.beta)  # beta and gamma have the same shape
             feature_index = self.feature_names.index(feature_name)
-            intron_index = self.intron_names.index(intron_name)
+            if self.intron_specific_lfc:
+                intron_index = self.intron_names.index(intron_name)
+            else:
+                intron_index = 0
+                if intron_name is not None:
+                    raise ValueError(
+                        f"Intron name {intron_name} specified, but the model uses shared LFC for all introns.")
+
             logical_mask[feature_index, intron_index] = 0.0
             fixed_value_mask = None
             if value != 0:
@@ -165,11 +176,18 @@ class Pol2Model(nn.Module):
                                            'value': param_value[feature_index].item()})
             elif param_name in ('beta', 'gamma'):
                 for feature_index, feature_name in enumerate(self.feature_names):
-                    for intron_index, intron_name in enumerate(self.intron_names):
+                    if self.intron_specific_lfc:
+                        for intron_index, intron_name in enumerate(self.intron_names):
+                            parameter_data.append({'parameter_type': param_name,
+                                                   'intron_name': intron_name,
+                                                   'feature_name': feature_name,
+                                                   'value': param_value[feature_index, intron_index].item()})
+                    else:
                         parameter_data.append({'parameter_type': param_name,
-                                               'intron_name': intron_name,
+                                               'intron_name': None,
                                                'feature_name': feature_name,
-                                               'value': param_value[feature_index, intron_index].item()})
+                                               'value': param_value[feature_index, 0].item()})
+
             elif param_name in ('intercept_intron', 'log_phi_zero'):
                 for intron_index, intron_name in enumerate(self.intron_names):
                     parameter_data.append({'parameter_type': param_name,
