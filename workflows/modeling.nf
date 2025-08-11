@@ -34,7 +34,7 @@ process SplitGeneNames {
     split_gene_names.R \
     --input_gene_names $gene_names \
     --output_folder . \
-    --chunk_size 20
+    --chunk_size 100
     """
 }
 
@@ -50,8 +50,6 @@ process RunModel {
         path(library_size_factors),
         path(coverage_parquet_files)
     )
-
-    stageInMode 'copy'
 
     output:
     path("model_results_*.csv"), emit: model_result_chunks
