@@ -34,7 +34,7 @@ process SplitGeneNames {
     split_gene_names.R \
     --input_gene_names $gene_names \
     --output_folder . \
-    --chunk_size 100
+    --chunk_size 20
     """
 }
 
