@@ -1,5 +1,5 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.7.0+cpu
+torch==2.8.0+cpu
 biopython==1.81
 numpy==1.26.2
 iranges==0.2.6
