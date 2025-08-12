@@ -96,7 +96,7 @@ class Pol2Model(nn.Module):
             intercept_exon_scalar = torch.log(gene_data.exon_reads.mean() / library_sizes.mean())
             self.intercept_exon.data[:] = intercept_exon_scalar  # preserve shape [1]
 
-            intercept_intron_vector = torch.log(gene_data.intron_reads.mean(axis=0) / library_sizes.mean())
+            intercept_intron_vector = torch.log(gene_data.intron_reads.mean(axis=0) / library_sizes.mean() / 2)
             self.intercept_intron.data.copy_(intercept_intron_vector)
 
     def set_parameter_mask(self,
