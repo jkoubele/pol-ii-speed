@@ -91,9 +91,7 @@ def train_model(gene_data: GeneData,
 
         previous_loss = loss
 
-    if best_loss < loss or np.isnan(loss):
-        model.load_state_dict(best_state_dict)
-
+    model.load_state_dict(best_state_dict)
     training_results = TrainingResults(final_loss=loss,
                                        converged_within_max_epochs=converged_within_max_epochs,
                                        num_epochs=epoch + 1,
@@ -151,6 +149,13 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     Adds results of the Wald test to the dataframe with model parameters.
     """
     df_param = df_param.copy()
+    if not torch.isfinite(hessian_matrix).all():
+        df_param['SE'] = np.nan
+        df_param['z_score'] = np.nan
+        df_param['p_value_wald'] = np.nan
+        df_param['identifiable'] = False
+        return df_param
+
     rank = torch.linalg.matrix_rank(hessian_matrix)
 
     # Rank-revealing QR is currently not available in Pytorch (see https://github.com/pytorch/pytorch/issues/10454),
