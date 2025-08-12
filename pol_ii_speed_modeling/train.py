@@ -166,11 +166,14 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     Adds results of the Wald test to the dataframe with model parameters.
     """
     df_param = df_param.copy()
-    if not torch.isfinite(hessian_matrix).all().item():
+    if torch.isfinite(hessian_matrix).all().item():
+        df_param['loss_hessian_is_finite'] = True
+    else:
         df_param['SE'] = np.nan
         df_param['z_score'] = np.nan
         df_param['p_value_wald'] = np.nan
         df_param['identifiable'] = False
+        df_param['loss_hessian_is_finite'] = False
         return df_param
 
     rank = torch.linalg.matrix_rank(hessian_matrix).item()
@@ -222,6 +225,8 @@ def get_results_for_gene(gene_data: GeneData,
     param_df = model.get_param_df()
     param_df['gene_name'] = gene_data.gene_name
     param_df['loss_unrestricted'] = training_results.final_loss
+    param_df['unrestricted_training_diverged'] = training_results.training_diverged
+    param_df['unrestricted_training_converged_within_max_epochs'] = training_results.converged_within_max_epochs
 
     if perform_wald_test:
         fisher_information_matrix = get_fisher_information_matrix(model=model,
