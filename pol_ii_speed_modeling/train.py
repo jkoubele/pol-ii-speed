@@ -86,11 +86,11 @@ def train_model(gene_data: GeneData,
     for epoch in range(max_epochs):
         optimizer.step(closure)
         loss_tensor = evaluate_loss()
+        loss = loss_tensor.item()
+        losses.append(loss)
         if not torch.isfinite(loss_tensor):
             training_diverged = True
             break
-        loss = loss_tensor.item()
-        losses.append(loss)
 
         if loss < best_loss:
             best_loss = loss
