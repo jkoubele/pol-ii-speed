@@ -11,6 +11,8 @@ from torch.func import functional_call, hessian
 
 from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 
+LOSS_CLAMP_VALUE = 1e30
+
 
 @dataclass
 class TrainingResults:
@@ -55,8 +57,21 @@ def train_model(gene_data: GeneData,
                                 predicted_reads_exon=predicted_reads_exon,
                                 predicted_reads_intron=predicted_reads_intron,
                                 phi=phi)
+        if not torch.isfinite(loss):
+            return torch.as_tensor(LOSS_CLAMP_VALUE, dtype=loss.dtype, device=loss.device)
         loss.backward()
         return loss
+
+    def evaluate_loss():
+        with torch.no_grad():
+            predicted_reads_exon, predicted_reads_intron, phi = model(dataset_metadata.design_matrix,
+                                                                      dataset_metadata.log_library_sizes)
+            return pol_2_total_loss(reads_exon=gene_data.exon_reads,
+                                    reads_introns=gene_data.intron_reads,
+                                    coverage=gene_data.coverage,
+                                    predicted_reads_exon=predicted_reads_exon,
+                                    predicted_reads_intron=predicted_reads_intron,
+                                    phi=phi)
 
     previous_loss = None
     patience_counter = 0
@@ -69,11 +84,13 @@ def train_model(gene_data: GeneData,
 
     losses: list[float] = []
     for epoch in range(max_epochs):
-        loss = optimizer.step(closure).item()
-        losses.append(loss)
-        if np.isnan(loss):
+        optimizer.step(closure)
+        loss_tensor = evaluate_loss()
+        if not torch.isfinite(loss_tensor):
             training_diverged = True
             break
+        loss = loss_tensor.item()
+        losses.append(loss)
 
         if loss < best_loss:
             best_loss = loss
@@ -149,14 +166,14 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     Adds results of the Wald test to the dataframe with model parameters.
     """
     df_param = df_param.copy()
-    if not torch.isfinite(hessian_matrix).all():
+    if not torch.isfinite(hessian_matrix).all().item():
         df_param['SE'] = np.nan
         df_param['z_score'] = np.nan
         df_param['p_value_wald'] = np.nan
         df_param['identifiable'] = False
         return df_param
 
-    rank = torch.linalg.matrix_rank(hessian_matrix)
+    rank = torch.linalg.matrix_rank(hessian_matrix).item()
 
     # Rank-revealing QR is currently not available in Pytorch (see https://github.com/pytorch/pytorch/issues/10454),
     # so we are going to use SciPy implementation.
@@ -164,7 +181,8 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     identifiable_indices = np.sort(qr_pivots[:rank])
     hessian_subset = hessian_matrix[identifiable_indices][:, identifiable_indices]
 
-    assert set(qr_pivots) == set(df_param.index)
+    if not set(qr_pivots) == set(df_param.index):
+        raise ValueError(f'Unexpected value of df_param.index: {df_param=}')
 
     # hessian_subset should have a full rank by the way it is constructed:
     # assert hessian_subset.shape[0] == torch.linalg.matrix_rank(hessian_subset)    
