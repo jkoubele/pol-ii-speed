@@ -2,7 +2,7 @@ outdir: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results"
 workDir: "/cellfile/datapublic/jkoubele/pol-ii-speed/workdirs/mouse_myocardium"
 
 # samplesheet: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/samplesheet.csv"
-samplesheet: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/samplesheets/samplesheet_wt_104_weeks.csv"
+samplesheet: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/samplesheets/samplesheet_Ercc1.csv"
 fastq_dir: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ"
 
 gtf_file: "/cellfile/datapublic/jkoubele/reference_genomes/GRCm39/Mus_musculus.GRCm39.112.gtf"
