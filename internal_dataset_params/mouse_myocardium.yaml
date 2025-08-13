@@ -1,7 +1,8 @@
 outdir: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results"
 workDir: "/cellfile/datapublic/jkoubele/pol-ii-speed/workdirs/mouse_myocardium"
 
-samplesheet: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/samplesheet.csv"
+# samplesheet: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/samplesheet.csv"
+samplesheet: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/samplesheets/samplesheet_wt_104_weeks.csv"
 fastq_dir: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/FASTQ"
 
 gtf_file: "/cellfile/datapublic/jkoubele/reference_genomes/GRCm39/Mus_musculus.GRCm39.112.gtf"
@@ -13,4 +14,8 @@ star_index: null
 salmon_index: null
 salmon_index_with_decoy: false
 
-stage: 'all' # one of ['preprocess', 'model', 'all']
+design_formula: "~group"
+factor_reference_levels: "/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/factor_references.csv"
+intron_specific_lfc: false # boolean flag
+
+stage: 'model' # one of ['preprocess', 'model', 'all']
