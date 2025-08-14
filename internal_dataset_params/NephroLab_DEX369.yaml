@@ -1,7 +1,7 @@
 outdir: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX369/dev_pol_ii_output/"
 workDir: "/cellfile/datapublic/jkoubele/pol-ii-speed/workdirs/NephroLab_DEX369"
 
-samplesheet: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX369/samplesheet.csv"
+samplesheet: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX369/samplesheet_updated.csv"
 fastq_dir: "/cellfile/datapublic/crc1678/data/A01_Müller/NephroLab_DEX369/FASTQ/"
 
 gtf_file: "/cellfile/datapublic/pungerav/global_data/genomes/homo_sapiens/GENCODE_GRCh38p14_genome/gencode.v47.chr_patch_hapl_scaff.annotation.gtf"
@@ -18,4 +18,8 @@ star_index: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/de
 salmon_index: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX228/dev_pol_ii_output/salmon_index/salmon_index/"
 salmon_index_with_decoy: false
 
-stage: 'all' # one of ['preprocess', 'model', 'all']
+design_formula: "~group"
+factor_reference_levels: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX369/factor_references.csv" # Optional, can be left null
+intron_specific_lfc: false # boolean flag
+
+stage: 'model' # one of ['preprocess', 'model', 'all']
