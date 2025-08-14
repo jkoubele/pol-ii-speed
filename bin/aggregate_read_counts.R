@@ -21,7 +21,14 @@ output_folder <- args$output_folder
 sample_names <- args$sample_names
 exon_quant_files <- args$exon_quant_files
 intron_counts_files <- args$intron_counts_files
-tx2gene <- read_tsv(args$tx2gene)
+
+tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE) |>
+  mutate(
+    TXNAME = sub("\\|.*$", "", TXNAME),
+    TXNAME = sub("\\.[0-9]+$", "", TXNAME)
+)
+
+
 
 if (!dir.exists(output_folder)) {
   dir.create(output_folder, recursive = TRUE)
