@@ -22,4 +22,4 @@ design_formula: "~group"
 factor_reference_levels: "/cellfile/datapublic/pungerav/pol_ii_speed/data/NephroLab_DEX369/factor_references.csv" # Optional, can be left null
 intron_specific_lfc: false # boolean flag
 
-stage: 'model' # one of ['preprocess', 'model', 'all']
+stage: 'all' # one of ['preprocess', 'model', 'all']
