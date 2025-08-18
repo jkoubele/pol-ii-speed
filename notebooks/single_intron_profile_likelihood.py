@@ -8,17 +8,26 @@ from scipy import stats
 import sys
 sys.path.insert(0, str(Path("/")))
 
-from pol_ii_speed_modeling.load_dataset import load_dataset_from_results_folder
+from pol_ii_speed_modeling.load_dataset import load_dataset_from_results_folder, load_gene_data_list
 
 
 
 #%%
+results_folder = Path('/home/jakub/Desktop/drosophila_mutants/results')
 
-results_folder = Path('/cellfile/datapublic/jkoubele/drosophila_mutants/results/')
-dataset_metadata, gene_data_list = load_dataset_from_results_folder(
-    results_folder=results_folder,
-    gene_names_file_name='protein_coding_genes.csv',
-    log_output_folder=Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results/model_results/'))
+
+# dataset_metadata, gene_data_list = load_dataset_from_results_folder(
+#     results_folder=results_folder,
+#     gene_names_file_name='test_subset.csv',
+#     log_output_folder=Path('/home/jakub/Desktop/drosophila_mutants/results/logs'))
+
+drosophila_sample_names = [f"SRX30881{x}" for x in range(23,35)]
+gene_data_list = load_gene_data_list(gene_names_file=results_folder / 'gene_names' / 'test_subset.csv',
+                                     exon_counts_file=results_folder / 'aggregated_counts' / 'exon_counts.tsv',
+                                     intron_counts_file = results_folder / 'aggregated_counts' / 'intron_counts.tsv',
+                                     coverage_folder = results_folder / 'rescaled_coverage',
+                                     sample_names = drosophila_sample_names,
+                                     log_output_folder=results_folder / 'logs')
 
 # %%
 introns_df = pd.read_csv(results_folder / 'extracted_introns/introns.bed',
@@ -26,8 +35,8 @@ introns_df = pd.read_csv(results_folder / 'extracted_introns/introns.bed',
                          names=['chromosome', 'start', 'end', 'name', 'score', 'strand']).set_index('name')
 
 
-gene_of_interest = 'FBgn0019985'
-intron_of_interest = 'FBgn0019985_9'
+gene_of_interest = 'FBgn0038542'
+intron_of_interest = 'FBgn0038542_1'
 gene_data = [x for x in gene_data_list if x.gene_name == gene_of_interest][0]
 
 # intron_index = gene_data.intron_names.index(intron_of_interest)
@@ -90,6 +99,8 @@ confidence_interval = (phi_linspace[indices[0]].item(),
 
 # %%
 
+coverage_locations = np.linspace(0.0, 1.0, 100)
+best_phi = 0.5
 # Components
 rect = 1 - best_phi
 triangle = 2 * best_phi * (1 - coverage_locations)
@@ -97,17 +108,23 @@ y = rect + triangle
 
 # Plot
 plt.plot(coverage_locations, y, color='black', label='Total density')
-plt.fill_between(coverage_locations, rect, y, alpha=0.25, color='purple',
-                 label='Reads from currently transcribed introns' if best_phi > 0 else None)
-plt.fill_between(coverage_locations, 0, rect, alpha=0.7, color='skyblue',
+plt.fill_between(coverage_locations, rect, y, alpha=0.75, color='#6baed6',
+                 label='Reads from currently transcribing introns' if best_phi > 0 else None)
+plt.fill_between(coverage_locations, 0, rect, alpha=1.0, color='#2166ac',
                  label='Reads from finished (but unspliced) introns' if best_phi<1 else None)
 
 plt.ylim(bottom=0)
-plt.xlabel("Position in intron (5' to 3')")
+plt.xlabel("Location in intron (5' to 3')")
 plt.ylabel("Coverage density")
-plt.title(f"Fitted density ($\\varphi$ = {round(best_phi, 4)})")
+# plt.title(f"Fitted density ($\\varphi$ = {round(best_phi, 4)})")
+plt.title(f"Intron read coverage density")
 plt.legend()
 plt.tight_layout()
+
+ax = plt.gca()
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
 plt.show()
 
 # %%
