@@ -16,7 +16,7 @@ Besides the FASTQ data, you will need to prepare two files to run the pipeline:
 ### Preparing samplesheet
 
 The file ```samplesheet.csv``` needs to containg following 4 columns: 
- * *sample*, specifying sample names (the names can be arbitrary)
+ * *sample*, specifying sample names (the names can be arbitrary).
  * *fastq_1*, name of FASTQ file with reads 1 (compressed by gunzip).
 * *fastq_2*, same as above for reads 2.
 * *strandedness*, specifying the strandedness (read orientation) of the samples. Currently, only values ```forward``` and ```reverse``` are supported.
@@ -27,5 +27,5 @@ be used in the dataset parameter file to specify a design formula (see below).
 
 ### Preparing dataset parameters
 
-The file ```dataset_params.yaml``` can be created by copying the [dataset_params_template.yaml](```dataset_params_template.yaml```) file
+The file ```dataset_params.yaml``` can be created by copying the [dataset_params_template.yaml](dataset_params_template.yaml) file
 and filling it according to the comments.
