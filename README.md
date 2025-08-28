@@ -2,6 +2,10 @@
 This repository contain a pipeline using total RNA-seq to estimate the changes of RNA Polymerase II
 elongation speed, and also the changes in the speed of intron splicing.
 
+For details, please read our paper *Estimating changes in RNA Polymerase II
+elongation and intron splicing speeds from total
+RNA-seq data*. The pre-print should be on a BioRxiv; the PDF is also available in this repository [here](./paper.pdf).
+
 The code is organized as a Nextflow pipeline. To run it, you will need FASTQ
 data of total RNA-seq; please read the documentation below for more details.
 
