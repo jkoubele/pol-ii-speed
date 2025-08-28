@@ -29,3 +29,11 @@ be used in the dataset parameter file to specify a design formula (see below).
 
 The file ```dataset_params.yaml``` can be created by copying the [dataset_params_template.yaml](dataset_params_template.yaml) file
 and filling it according to the comments.
+
+### Executing the pipeline
+
+Please install [Nextflow](https://www.nextflow.io/) and [Docker](https://www.docker.com/) on your system.
+Then, the pipeline can be run by
+```commandline
+nextflow run main.nf -params-file dataset_params.yaml
+```
