@@ -1,22 +1,22 @@
-outdir: "./results" # Output folder for pipeline results
-workDir: "./work" # Path to Nextflow work directory (will be used for caching)
+outdir: "./results" # Output folder for pipeline results.
+workDir: "./work" # Path to Nextflow work directory (will be used for caching).
 
-samplesheet: "./samplesheet.csv"  # Path to the CSV file with sample annotation
-fastq_dir: "/path/to/your/FASTQ" # Path to the folder containing FASTQ data
+samplesheet: "./samplesheet.csv"  # Path to the CSV file with sample annotation.
+fastq_dir: "/path/to/your/FASTQ" # Path to the folder containing FASTQ data.
 
 gtf_file: "/path/to/the/gtf/genome/annotation/file"
 genome_fasta: "/path/to/genome/fasta"
 transcriptome_fasta: "/path/to/transcriptome/fasta"
-gtf_source: "ensembl" # Either 'ensembl' or 'gencode'
+gtf_source: "ensembl" # Either 'ensembl' or 'gencode'.
 
-star_index: null # Optional path to existing STAR index
-salmon_index: null # Optional path to existing Salmon index
-salmon_index_with_decoy: false  # If true, use decoy-aware Salmon indexing
+star_index: null # Optional path to existing STAR index.
+salmon_index: null # Optional path to existing Salmon index.
+salmon_index_with_decoy: false  # If true, use decoy-aware Salmon indexing.
 # See Salmon documentation for details: https://salmon.readthedocs.io/en/latest/salmon.html#preparing-transcriptome-indices-mapping-based-mode
-# Can require lots of memory for larger genomes, we didn't manage to execude it for human genome even with 200GB RAM.
+# Can require lots of memory for larger genomes, we didn't manage to execute it for human genome even with 200GB RAM.
 
-design_formula: "~your+design+formula" # Design formula, specified as formulas in R
-factor_reference_levels: null # Optional path to CSV file specifying factor baselines
-intron_specific_lfc: false # Whether Pol II speed and splicing speed LFC should be intron-specific (true) or gene-specific (true)
+design_formula: "~your+design+formula" # Design formula, specified as formulas in R.
+factor_reference_levels: null # Optional path to CSV file specifying factor baselines.
+intron_specific_lfc: false # Whether Pol II speed and splicing speed LFC should be intron-specific (true) or gene-specific (false).
 
-stage: 'all' # one of ['preprocess', 'model', 'all']
+stage: 'all' # One of ['preprocess', 'model', 'all'].
