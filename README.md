@@ -86,3 +86,8 @@ See the Nextflow documentation for [details](https://www.nextflow.io/docs/latest
 their CPU usage somehow collide, resulting in orders of magnitude slower process execution. We suspect that this may be related to the
 underlying BLAST setting and/or our cluster set up, and we are currently trying to resolve this issue. In case that you experience similar behavior, please
 execute at most one *RunModel* process per cluster node.
+
+## Contact
+If you have any questions or experience any problems with the code,
+please open an issue on this repository, or reach out at
+[jkoubele@uni-koeln.de](mailto:jkoubele@uni-koeln.de).

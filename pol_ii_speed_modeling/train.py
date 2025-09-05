@@ -49,14 +49,14 @@ def train_model(gene_data: GeneData,
 
     def closure():
         optimizer.zero_grad()
-        predicted_reads_exon, predicted_reads_intron, phi = model(dataset_metadata.design_matrix,
-                                                                  dataset_metadata.log_library_sizes)
+        predicted_reads_exon, predicted_reads_intron, pi = model(dataset_metadata.design_matrix,
+                                                                 dataset_metadata.log_library_sizes)
         loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                 reads_introns=gene_data.intron_reads,
                                 coverage=gene_data.coverage,
                                 predicted_reads_exon=predicted_reads_exon,
                                 predicted_reads_intron=predicted_reads_intron,
-                                phi=phi)
+                                pi=pi)
         if not torch.isfinite(loss):
             return torch.as_tensor(LOSS_CLAMP_VALUE, dtype=loss.dtype, device=loss.device)
         loss.backward()
@@ -64,14 +64,14 @@ def train_model(gene_data: GeneData,
 
     def evaluate_loss():
         with torch.no_grad():
-            predicted_reads_exon, predicted_reads_intron, phi = model(dataset_metadata.design_matrix,
-                                                                      dataset_metadata.log_library_sizes)
+            predicted_reads_exon, predicted_reads_intron, pi = model(dataset_metadata.design_matrix,
+                                                                     dataset_metadata.log_library_sizes)
             return pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                     reads_introns=gene_data.intron_reads,
                                     coverage=gene_data.coverage,
                                     predicted_reads_exon=predicted_reads_exon,
                                     predicted_reads_intron=predicted_reads_intron,
-                                    phi=phi)
+                                    pi=pi)
 
     previous_loss = None
     patience_counter = 0
@@ -148,13 +148,13 @@ def get_fisher_information_matrix(model: Pol2Model,
     def loss_by_model_parameters(model_parameters):
         outputs = functional_call(model, model_parameters, (dataset_metadata.design_matrix,
                                                             dataset_metadata.log_library_sizes))
-        predicted_reads_exon, predicted_reads_intron, phi = outputs
+        predicted_reads_exon, predicted_reads_intron, pi = outputs
         return pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                 reads_introns=gene_data.intron_reads,
                                 coverage=gene_data.coverage,
                                 predicted_reads_exon=predicted_reads_exon,
                                 predicted_reads_intron=predicted_reads_intron,
-                                phi=phi)
+                                pi=pi)
 
     hessian_dict = hessian(loss_by_model_parameters)(model_parameters)
     hessian_matrix = flatten_hessian_dict(hessian_dict, model_parameters)

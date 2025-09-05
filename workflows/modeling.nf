@@ -82,16 +82,16 @@ process MergeModelResultChunks {
 
     output:
     path("model_results.csv"), emit: model_results
+    path("model_results_raw.csv")
     path ("model_parameters.txt")
 
     publishDir "${params.outdir}/model_results/${model_run_id}", mode: 'copy'
 
     script:
     """
-    merge_model_result_chunks.R \
+    merge_and_clean_result_chunks.R \
     --input_folder . \
-    --output_folder . \
-    --output_file_name model_results.csv
+    --output_folder .
 
 # Intentionally missing indent, so EOF works properly
 cat > model_parameters.txt <<EOF

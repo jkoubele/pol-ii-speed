@@ -85,7 +85,7 @@ class Pol2Model(nn.Module):
         self.intron_specific_lfc = intron_specific_lfc
 
         self.intercept_intron = nn.Parameter(torch.zeros(num_introns))
-        self.log_phi_zero = nn.Parameter(torch.zeros(num_introns))
+        self.theta = nn.Parameter(torch.zeros(num_introns))
 
         self.mask_alpha: Optional[ParameterMask] = None
         self.mask_beta: Optional[ParameterMask] = None
@@ -149,15 +149,15 @@ class Pol2Model(nn.Module):
         speed_term = design_matrix @ beta
         splicing_term = design_matrix @ gamma
 
-        phi = torch.sigmoid(self.log_phi_zero - speed_term - splicing_term)
+        pi = torch.sigmoid(self.theta - speed_term - splicing_term)
 
         intron_gene_expression_term = self.intercept_intron + log_library_sizes.unsqueeze(
             1) + gene_expression_term.unsqueeze(1)
-        reads_intronic_polymerases = safe_exp(intron_gene_expression_term + self.log_phi_zero - speed_term)
+        reads_intronic_polymerases = safe_exp(intron_gene_expression_term + self.theta - speed_term)
         reads_unspliced_transcripts = safe_exp(intron_gene_expression_term + splicing_term)
         predicted_reads_intron = reads_intronic_polymerases + reads_unspliced_transcripts
 
-        return safe_exp(predicted_log_reads_exon), predicted_reads_intron, phi
+        return safe_exp(predicted_log_reads_exon), predicted_reads_intron, pi
 
     def get_param_df(self) -> pd.DataFrame:
         model_parameters = dict(self.named_parameters())
@@ -188,7 +188,7 @@ class Pol2Model(nn.Module):
                                                'feature_name': feature_name,
                                                'value': param_value[feature_index, 0].item()})
 
-            elif param_name in ('intercept_intron', 'log_phi_zero'):
+            elif param_name in ('intercept_intron', 'theta'):
                 for intron_index, intron_name in enumerate(self.intron_names):
                     parameter_data.append({'parameter_type': param_name,
                                            'intron_name': intron_name,
@@ -228,11 +228,11 @@ class Pol2TotalLoss(nn.Module):
                 coverage: torch.Tensor,
                 predicted_reads_exon: torch.Tensor,
                 predicted_reads_intron: torch.Tensor,
-                phi: torch.Tensor):
+                pi: torch.Tensor):
         loss_exon = self.loss_function_exon(predicted_reads_exon,
                                             reads_exon)
         loss_intron = self.loss_function_intron(predicted_reads_intron, reads_introns)
-        loss_coverage = self.loss_function_coverage(phi, coverage)
+        loss_coverage = self.loss_function_coverage(pi, coverage)
 
         total_loss = loss_exon + loss_intron + loss_coverage
         return total_loss
