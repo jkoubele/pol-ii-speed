@@ -15,7 +15,7 @@ process CreateDesignMatrix {
     """
     generate_design_matrix.R \
     --samplesheet $samplesheet \
-    --formula $design_formula \
+    --formula "$design_formula" \
      ${factor_references ? "--factor_references $factor_references" : ""}
     """
 }
@@ -95,7 +95,7 @@ process MergeModelResultChunks {
 
 # Intentionally missing indent, so EOF works properly
 cat > model_parameters.txt <<EOF
-design_formula: ${design_formula}
+design_formula: "${design_formula}"
 intron_specific_lfc: ${intron_specific_lfc}
 EOF
     """
