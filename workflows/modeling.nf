@@ -104,19 +104,19 @@ EOF
 
 workflow modeling_workflow {
     take:
-        samplesheet
-        gene_names_file
-        exon_counts
-        intron_counts
-        library_size_factors
-        coverage_files
+        samplesheet_input
+        gene_names_file_input
+        exon_counts_input
+        intron_counts_input
+        library_size_factors_input
+        coverage_files_input
         design_formula
         factor_reference_levels
         intron_specific_lfc
 
 
     main:
-        def samplesheet_channel = Channel.value(file(samplesheet))
+        def samplesheet_channel = Channel.value(file(samplesheet_input))
         def factor_reference_channel = factor_reference_levels ? Channel.value(file(factor_reference_levels)) : Channel.value([])
 
 
@@ -124,17 +124,17 @@ workflow modeling_workflow {
                                                        design_formula,
                                                        factor_reference_channel)
 
-        gene_names_split = SplitGeneNames(gene_names_file)
+        gene_names_split = SplitGeneNames(gene_names_file_input)
 
         def model_input = gene_names_split.gene_names_chunks
             .flatten()
             .map{ file -> tuple(file, file.baseName)}
             .combine(design_matrix_channel.design_matrix)
-            .combine(exon_counts)
-            .combine(intron_counts)
-            .combine(library_size_factors)
-            // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
-            .combine(coverage_files.map { file_list -> tuple([file_list]) })
+            .combine(exon_counts_input)
+            .combine(intron_counts_input)
+            .combine(library_size_factors_input)
+            // Wrapping coverage_files_input in an extra list prevents unwanted flattening behavior in .combine()
+            .combine(coverage_files_input.map { file_list -> tuple([file_list]) })
             // Raw intron_specific_lfc is bool and cannot be used in combine()
             .combine(Channel.value(intron_specific_lfc))
 
