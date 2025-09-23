@@ -84,7 +84,7 @@ See the Nextflow documentation for [details](https://www.nextflow.io/docs/latest
 
 **Note on Slurm**: On our HPC system using Slurm, we noticed the following bug: when multiple processes fitting the model are executed on the same cluster node,
 their CPU usage somehow collide, resulting in orders of magnitude slower process execution. We suspect that this may be related to the
-underlying BLAST setting and/or our cluster set up, and we are currently trying to resolve this issue. In case that you experience similar behavior, please
+underlying BLAS setting and/or our cluster set up, and we are currently trying to resolve this issue. In case that you experience similar behavior, please
 execute at most one *RunModel* process per cluster node.
 
 ## Contact
