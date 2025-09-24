@@ -5,6 +5,7 @@ import torch
 from pathlib import Path
 import matplotlib.pyplot as plt
 from scipy.special import expit
+import pickle
 
 from pol_ii_speed_modeling.pol_ii_model import (
     GeneData, DatasetMetadata, Pol2Model, Pol2TotalLoss
@@ -13,11 +14,16 @@ from pol_ii_speed_modeling.pol_ii_model import (
 
 from pol_ii_speed_modeling.load_dataset import load_dataset_from_results_folder
 
-
-dataset_metadata, gene_data_list = load_dataset_from_results_folder(
-    results_folder=Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results/'),
-    log_output_folder=Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results/logs'),
-    gene_names_file_name='test.csv')
+with open("gene_data_list.pkl", "rb") as f:
+    gene_data_list = pickle.load(f)
+    
+with open("dataset_metadata.pkl", "rb") as f:
+    dataset_metadata = pickle.load(f)
+    
+# dataset_metadata, gene_data_list = load_dataset_from_results_folder(
+#     results_folder=Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results/'),
+#     log_output_folder=Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results/logs'),
+#     gene_names_file_name='test.csv')
 #%%
 
 gene_data = gene_data_list[0]
