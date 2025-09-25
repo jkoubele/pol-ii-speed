@@ -14,11 +14,11 @@ from pol_ii_speed_modeling.pol_ii_model import (
 
 from pol_ii_speed_modeling.load_dataset import load_dataset_from_results_folder
 
-with open("gene_data_list.pkl", "rb") as f:
-    gene_data_list = pickle.load(f)
+with open("gene_data_list.pkl", "rb") as file:
+    gene_data_list = pickle.load(file)
     
-with open("dataset_metadata.pkl", "rb") as f:
-    dataset_metadata = pickle.load(f)
+with open("dataset_metadata.pkl", "rb") as file:
+    dataset_metadata = pickle.load(file)
     
 # dataset_metadata, gene_data_list = load_dataset_from_results_folder(
 #     results_folder=Path('/cellfile/datapublic/jkoubele/data_pol_ii/mouse_myocardium/results/'),
@@ -30,6 +30,7 @@ gene_data = gene_data_list[0]
 design_matrix = dataset_metadata.design_matrix.numpy()
 
 n, p = design_matrix.shape
+constraints = []
 
 exon_reads = gene_data.exon_reads.numpy()  # shape (n,)
 intron_reads = gene_data.intron_reads[:,2].numpy() # shape (n,)
@@ -45,12 +46,37 @@ gamma = cp.Variable(p) # shape (p,)
 intercept_intron = cp.Variable()
 theta = cp.Variable()
 
+
+transcribing_introns_term = intercept_intron + theta + design_matrix @ (alpha - beta)
+unspliced_introns_term = intercept_intron + design_matrix @ (alpha + gamma)
+predicted_reads_intron = cp.exp(transcribing_introns_term) + cp.exp(unspliced_introns_term)
+intron_loss_original = cp.sum(predicted_reads_intron - cp.multiply(intron_reads, cp.log(predicted_reads_intron)))
+
+
+t_vec = np.full(n, 0.5)
+# transcribing_introns_surrogate = cp.Variable(n, nonneg=True)
+# unspliced_introns_surrogate = cp.Variable(n, nonneg=True)
+# predicted_reads_intron_surrogate = cp.Variable(n, nonneg=True)
+
+# constraints += [
+#     transcribing_introns_surrogate >= cp.exp(transcribing_introns_term),
+#     unspliced_introns_surrogate >= cp.exp(unspliced_introns_term),
+#     predicted_reads_intron_surrogate == transcribing_introns_surrogate + unspliced_introns_surrogate,
+# ]
+
+
+
+lse_bound = cp.log(predicted_reads_intron_surrogate)
+
+intron_loss_relaxed = cp.sum(predicted_reads_intron_surrogate - cp.multiply(intron_reads, lse_bound))
+
 custom_value = cp.sum(2 * alpha) 
 
 
 
-objective = cp.Minimize(exon_loss)
-problem = cp.Problem(objective)
+objective = cp.Minimize(exon_loss + intron_loss_relaxed)
+
+problem = cp.Problem(objective, constraints)
 ret = problem.solve()
 
 ret_stats = problem.solver_stats
