@@ -6,6 +6,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from scipy.special import expit
 import pickle
+from dataclasses import dataclass
+from queue import PriorityQueue
+
+from cvxpy.constraints import Constraint
 
 from pol_ii_speed_modeling.pol_ii_model import (
     GeneData, DatasetMetadata, Pol2Model, Pol2TotalLoss
@@ -41,19 +45,152 @@ predicted_log_reads_exon = intercept_exon + design_matrix @ alpha
 exon_loss = cp.sum(cp.exp(predicted_log_reads_exon) - cp.multiply(exon_reads, predicted_log_reads_exon))
 
 
+#%% 1 intron only, ignore exon term
+
 beta = cp.Variable(p) # shape (p,)
 gamma = cp.Variable(p) # shape (p,)
 intercept_intron = cp.Variable()
 theta = cp.Variable()
 
+node_constraints = []
 
-transcribing_introns_term = intercept_intron + theta + design_matrix @ (alpha - beta)
-unspliced_introns_term = intercept_intron + design_matrix @ (alpha + gamma)
-predicted_reads_intron = cp.exp(transcribing_introns_term) + cp.exp(unspliced_introns_term)
-intron_loss_original = cp.sum(predicted_reads_intron - cp.multiply(intron_reads, cp.log(predicted_reads_intron)))
+example_row_0 = np.array([0.0], dtype=np.float32)
+example_row_1 = np.array([1.0], dtype=np.float32)
+
+node_constraints += [intercept_intron + theta - example_row_1 @ beta <= 1.0]
+node_constraints += [intercept_intron + example_row_1 @ gamma <= 1.0]
+# node_constraints = []
 
 
-t_vec = np.full(n, 0.5)
+
+loss = 0
+problem_constraints = []
+problem_variables = {'u': [], 'a': [], 'b': []}
+POISSON_LOSS_EPSILON = 1e-12
+MAX_GAP_TOLERANCE = 0.25
+
+for i, row in enumerate(design_matrix):
+    a = intercept_intron + theta - row @ beta
+    b = intercept_intron + row @ gamma
+    # construct LP to get bounds on A and B   
+    min_a = cp.Problem(cp.Minimize(a), node_constraints).solve()
+    max_a = cp.Problem(cp.Maximize(a), node_constraints).solve()
+    
+    min_b = cp.Problem(cp.Minimize(b), node_constraints).solve()
+    max_b = cp.Problem(cp.Maximize(b), node_constraints).solve()
+    
+    # These min/max may not be tight for more complex constrains --> optimize v directly 
+    # in a convex program instead of the LPs above
+    min_v = np.exp(min_a) + np.exp(min_b)
+    max_v = np.exp(max_a) + np.exp(max_b)
+    
+    n = intron_reads[i]
+    
+    if max_v <= n:
+        loss += max_v - n * np.log(max_v + POISSON_LOSS_EPSILON)
+        print(f"{max_v} <= {n}")
+    else:
+        u = cp.Variable()
+        problem_constraints.append(u >= cp.exp(a) + cp.exp(b))
+        
+        problem_variables['u'] += [u]
+        problem_variables['a'] += [a]
+        problem_variables['b'] += [b]
+        loss += u - n * cp.log(u + POISSON_LOSS_EPSILON)
+        pass
+    
+    
+problem = cp.Problem(cp.Minimize(loss), node_constraints + problem_constraints)
+node_loss = problem.solve() # replace by a certified lower bound (dual objective) later on
+print(f"{node_loss=}")
+
+#%% BnB
+
+beta = cp.Variable(p) # shape (p,)
+gamma = cp.Variable(p) # shape (p,)
+intercept_intron = cp.Variable()
+theta = cp.Variable()
+
+logit_transcribing = [intercept_intron + theta - row @ beta for row in design_matrix]
+logit_unspliced = [intercept_intron + row @ gamma for row in design_matrix]
+
+
+best_feasible_loss = sum([intron_reads.mean() - n * np.log(intron_reads.mean()) for n in intron_reads])
+
+
+@dataclass
+class Node:
+    parent_lower_bound: float
+    node_constraints: list[Constraint]
+    
+    def __lt__(self, other):
+        return self.parent_lower_bound < other.parent_lower_bound
+    
+root_node = Node(parent_lower_bound=-np.inf,
+                 node_constraints=[])
+stack = PriorityQueue()
+stack.put(root_node)
+
+while not stack.empty():
+    node = stack.get()
+    
+    loss = cp.Constant(0.0)
+    problem_constraints: list[Constraint] = []
+    lifted_variables = [cp.Variable() for _ in range(len(design_matrix))]
+    for a, b, n, u in zip(logit_transcribing, logit_unspliced, intron_reads, lifted_variables):
+        
+        # Solve small LPs to get bounds on logits. Optionally solve full convex program
+        # for predicted intron reads directly, which may be tighter that LPs for more complex constraints.
+        min_a = cp.Problem(cp.Minimize(a), node.node_constraints).solve()
+        max_a = cp.Problem(cp.Maximize(a), node.node_constraints).solve()
+        
+        min_b = cp.Problem(cp.Minimize(b), node.node_constraints).solve()
+        max_b = cp.Problem(cp.Maximize(b), node.node_constraints).solve()        
+        
+        min_v = np.exp(min_a) + np.exp(min_b)
+        max_v = np.exp(max_a) + np.exp(max_b)  
+        
+        loss += u - n * cp.log(u + POISSON_LOSS_EPSILON)
+        
+        if max_v <= n:
+            problem_constraints += [u <= max_v]
+        else:
+            problem_constraints += [u >= cp.exp(a) + cp.exp(b)]   
+            
+    problem = cp.Problem(cp.Minimize(loss), node_constraints + problem_constraints)
+    loss_relaxed = problem.solve() # replace by a certified lower bound (dual objective) later on
+    
+    if loss_relaxed >= best_feasible_loss:
+        continue
+    
+    # Compute node feasible loss
+    A = intercept_intron + theta - design_matrix @ beta
+    B = intercept_intron + design_matrix @ gamma
+    V = cp.exp(A) + cp.exp(B)
+    node_feasible_loss= sum([pred - observed_reads * np.log(pred + POISSON_LOSS_EPSILON)
+                             for pred, observed_reads in zip(V.value, intron_reads)])    
+    
+    if node_feasible_loss < best_feasible_loss:
+        best_feasible_loss = loss_relaxed
+        # Store also the best parameters
+        
+    if loss_relaxed + MAX_GAP_TOLERANCE < best_feasible_loss:
+        # Expand the current node
+        pass
+        
+        
+
+
+# A = intercept_intron + theta - design_matrix @ beta
+# B = intercept_intron + design_matrix @ gamma
+
+
+#%%
+# predicted_reads_intron = cp.exp(transcribing_introns_term) + cp.exp(unspliced_introns_term)
+# intron_loss_original = cp.sum(predicted_reads_intron - cp.multiply(intron_reads, cp.log(predicted_reads_intron)))
+
+
+# t_vec = np.full(n, 0.5)
 # transcribing_introns_surrogate = cp.Variable(n, nonneg=True)
 # unspliced_introns_surrogate = cp.Variable(n, nonneg=True)
 # predicted_reads_intron_surrogate = cp.Variable(n, nonneg=True)
@@ -66,25 +203,25 @@ t_vec = np.full(n, 0.5)
 
 
 
-lse_bound = cp.log(predicted_reads_intron_surrogate)
+# lse_bound = cp.log(predicted_reads_intron_surrogate)
 
-intron_loss_relaxed = cp.sum(predicted_reads_intron_surrogate - cp.multiply(intron_reads, lse_bound))
+# intron_loss_relaxed = cp.sum(predicted_reads_intron_surrogate - cp.multiply(intron_reads, lse_bound))
 
-custom_value = cp.sum(2 * alpha) 
+# custom_value = cp.sum(2 * alpha) 
 
 
 
-objective = cp.Minimize(exon_loss + intron_loss_relaxed)
+# objective = cp.Minimize(exon_loss + intron_loss_relaxed)
 
-problem = cp.Problem(objective, constraints)
-ret = problem.solve()
+# problem = cp.Problem(objective, constraints)
+# ret = problem.solve()
 
-ret_stats = problem.solver_stats
+# ret_stats = problem.solver_stats
 
-print(f"{problem.status=}")
+# print(f"{problem.status=}")
 
-reads_1 = exon_reads[(design_matrix==0).flatten()]
-reads_2 = exon_reads[(design_matrix==1).flatten()]
+# reads_1 = exon_reads[(design_matrix==0).flatten()]
+# reads_2 = exon_reads[(design_matrix==1).flatten()]
 
 
 # ret = problem.solve()
