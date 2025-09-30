@@ -117,7 +117,10 @@ logit_unspliced = [intercept_intron + row @ gamma for row in design_matrix]
 
 best_feasible_loss = sum([intron_reads.mean() - n * np.log(intron_reads.mean()) for n in intron_reads])
 
-
+def poisson_loss(prediction: np.array, target: np.array) -> np.array:
+    return np.array([pred - target_value * np.log(pred + POISSON_LOSS_EPSILON)
+                     for pred, target_value in zip(prediction, target)])
+    
 @dataclass
 class Node:
     parent_lower_bound: float
@@ -153,12 +156,14 @@ while not stack.empty():
         loss += u - n * cp.log(u + POISSON_LOSS_EPSILON)
         
         if max_v <= n:
+            print(f"{max_v=}")
             problem_constraints += [u <= max_v]
         else:
             problem_constraints += [u >= cp.exp(a) + cp.exp(b)]   
             
     problem = cp.Problem(cp.Minimize(loss), node_constraints + problem_constraints)
     loss_relaxed = problem.solve() # replace by a certified lower bound (dual objective) later on
+    print(f"{loss_relaxed=}")
     
     if loss_relaxed >= best_feasible_loss:
         continue
@@ -167,16 +172,36 @@ while not stack.empty():
     A = intercept_intron + theta - design_matrix @ beta
     B = intercept_intron + design_matrix @ gamma
     V = cp.exp(A) + cp.exp(B)
-    node_feasible_loss= sum([pred - observed_reads * np.log(pred + POISSON_LOSS_EPSILON)
-                             for pred, observed_reads in zip(V.value, intron_reads)])    
+    print(f"{V.value=}")
+    node_feasible_loss= sum(poisson_loss(V.value, intron_reads))
     
     if node_feasible_loss < best_feasible_loss:
+        print(f"{best_feasible_loss=}")
         best_feasible_loss = loss_relaxed
+        print(f"{node_feasible_loss=}")
         # Store also the best parameters
         
     if loss_relaxed + MAX_GAP_TOLERANCE < best_feasible_loss:
+        sample_loss_relaxed = poisson_loss(np.array([u.value for u in lifted_variables]), intron_reads)
+        sample_loss_original = poisson_loss(V.value, intron_reads)
+        sample_gap =  sample_loss_original - sample_loss_relaxed
+        
+        largest_gap_sample = int(sample_gap.argmax())
+        x_for_bound = design_matrix[largest_gap_sample]
+        bound_reads = (V.value[largest_gap_sample] + intron_reads[largest_gap_sample]) / 2
+        print(f"{bound_reads=}")
         # Expand the current node
-        pass
+        cut_boundary_1 = intercept_intron + theta - x_for_bound @ beta - np.log(bound_reads / 2)
+        cut_boundary_2 = intercept_intron + x_for_bound @ gamma -  np.log(bound_reads / 2)
+        children = []
+        for inequality_signs in [(1,1), (1,-1), (-1,1), (-1,-1)]:
+            new_constraints = [cut_boundary_1 * inequality_signs[0] <= 0,
+                               cut_boundary_2 * inequality_signs[1] <= 0]
+            child = Node(parent_lower_bound=loss_relaxed,
+                         node_constraints=node.node_constraints + new_constraints)
+            stack.put(child)
+            print(f"{child.node_constraints=}")
+    print(f"{stack.qsize()=}")
         
         
 
