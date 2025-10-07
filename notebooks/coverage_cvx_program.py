@@ -70,14 +70,42 @@ plt.show()
 # points = np.stack((logits_range, loss_by_logits), axis=1)
 # hull = ConvexHull(points)
 
+logit_optimal = logits_range[loss_by_logits.argmin()]
+loss_min = loss_by_logits.min()
 
 # Obtain from LP
-logit_lb = -2
-logit_ub = 1
+logit_lb = -np.inf
+logit_ub = -1
+
+
+create_envelope = False
+envelope_lb: Optional[float] = None
+envelope_ub: Optional[float] = None
+global_lb: Optional[float] = None
+
 
 if logit_lb == -np.inf and logit_ub == np.inf:
     # Add just a global lower bound on the loss
-    pass
+    global_lb = loss_min
+    
+elif logit_lb == -np.inf and logit_ub <= logit_optimal:
+    global_lb = loss_by_pi(expit(logit_ub), coverage)
+    
+elif logit_lb == -np.inf and logit_ub > logit_optimal:
+    global_lb = loss_min
+    
+    create_envelope = True
+    envelope_lb = logit_optimal
+    envelope_ub = logit_ub
+    
+elif (-np.inf < logit_lb < logit_optimal) and logit_ub == np.inf:
+    global_lb = loss_min
+    create_envelope = True
+    envelope_lb = logit_lb
+    envelope_ub = logit_optimal
+    
+    
+    
 
 else:
     envelope_lb = logit_lb
