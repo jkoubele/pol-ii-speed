@@ -71,6 +71,26 @@ plt.show()
 # hull = ConvexHull(points)
 
 
+# Obtain from LP
+logit_lb = -2
+logit_ub = 1
+
+if logit_lb == -np.inf and logit_ub == np.inf:
+    # Add just a global lower bound on the loss
+    pass
+
+else:
+    envelope_lb = logit_lb
+    envelope_ub =  logit_ub
+    
+    if logit_lb == -np.inf:        
+        pass
+    
+
+
+
+
+
 xs = logits_range
 ys = loss_by_logits
 
