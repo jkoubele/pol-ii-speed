@@ -44,6 +44,7 @@ def get_loss_by_logit(logit: float, coverage: np.array) -> float:
     return get_loss_by_pi(pi=expit(logit), coverage=coverage)
 
 
+
 def get_convex_envelope(xs: np.ndarray, xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     pts = np.column_stack([xs, ys])
     hull = ConvexHull(pts)
@@ -102,6 +103,52 @@ plt.show()
 logit_optimal = logits_range[loss_by_logits.argmin()]
 loss_min = loss_by_logits.min()
 
+#%%
+
+theta = cp.Variable()
+
+@dataclass
+class Node:
+    parent_lower_bound: float
+    node_constraints: list[Constraint]
+    constraints_string: Optional[list[str]] = field(default_factory=list)
+    
+    def __lt__(self, other):
+        return self.parent_lower_bound < other.parent_lower_bound
+    
+root_node = Node(parent_lower_bound=-np.inf,
+                 node_constraints=[])
+stack = PriorityQueue()
+stack.put(root_node)
+
+class LogitBounds(NamedTuple):
+    min_logit: float
+    max_logit: float    
+    
+    
+
+while not stack.empty():
+    node = stack.get()
+    
+    logit_boundaries: list[LogitBounds] = []
+    
+    node_is_infeasible = False        
+    
+    logit = 1 * theta # Will replace for formula with LFC and design matrix
+    
+    # Iterate over samples/strata
+    problem_min_logit = cp.Problem(cp.Minimize(logit), node.node_constraints)
+    min_logit = problem_min_logit.solve(solver=cp.GLPK)   
+
+    problem_max_logit = cp.Problem(cp.Maximize(logit), node.node_constraints)
+    max_logit = problem_max_logit.solve(solver=cp.GLPK)     
+    
+    if problem_min_logit.status == cp.INFEASIBLE or problem_max_logit.status == cp.INFEASIBLE:          
+        node_is_infeasible = True
+           
+    
+import sys
+sys.exit(0)   
 
 # Obtain from LP
 logit_lb = -3.0
