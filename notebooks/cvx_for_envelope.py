@@ -3,6 +3,7 @@ import cvxpy as cp
 import pickle
 from scipy.special import expit
 from scipy.special import logit as logit_function
+from typing import NamedTuple
 
 NUM_POSITION_COVERAGE = 100
 LOCATIONS = np.linspace(1 / (2 * NUM_POSITION_COVERAGE),
@@ -26,6 +27,14 @@ def get_loss_derivative_by_logit(logit: float, coverage: np.array) -> float:
     s = expit(logit)
     derivative_by_location = - (1 - 2 * LOCATIONS) * s * (1 - s) / (1 + s - 2 * s * LOCATIONS)
     return coverage @ derivative_by_location
+
+
+class CoverageCvxOptimResults(NamedTuple):
+    primal_objective: float
+    dual_objective: float
+    pi_optimal: float
+    logit_optimal: float
+    pi_constraints_active: bool
 
 
 coverage_left = np.zeros_like(coverage_mid)
@@ -69,5 +78,5 @@ print(f"{pi_upper_bound.dual_value=}")
 
 class IntronCoverage:
 
-    def __init__(self, coverage: np.ndarray, locations: np.ndarray) -> None:
-        pass
+    def __init__(self, coverage: np.ndarray) -> None:
+        self.coverage = coverage
