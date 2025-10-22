@@ -277,9 +277,6 @@ class IntronCoverage:
                 envelope_ub = logit_ub
 
 
-
-
-
             elif logit_ub == np.inf:
                 if logit_lb < self.optim_results.logit_optimal:
                     # Envelope on (logit_lb, logit_optimal) + global bound of logit_optimal
@@ -304,9 +301,6 @@ class IntronCoverage:
 
         envelope_points = None
         if create_envelope:
-            print(f"{envelope_lb=}")
-            print(f"{envelope_ub=}")
-            # TO-DO: handle corner cases
             envelope_lb_logit_index = self.logit_range.searchsorted(envelope_lb, side='left')
             envelope_ub_logit_index = max(0, self.logit_range.searchsorted(envelope_ub, side='left') - 1)
 
@@ -328,8 +322,8 @@ class IntronCoverage:
         return global_lb, envelope_points
 
 
-intron_coverage = IntronCoverage(coverage_uniform)
-global_lb, envelope_points = intron_coverage.get_bound_and_envelope(-np.inf, 5)
+intron_coverage = IntronCoverage(coverage_mid)
+global_lb, envelope_points = intron_coverage.get_bound_and_envelope(-3, 5)
 
 plt.plot(intron_coverage.logit_range, intron_coverage.sampled_loss, label='Loss', color='#1f77b4')
 
