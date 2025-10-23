@@ -213,7 +213,8 @@ class IntronCoverage:
             logit_range_left -= 0.1
 
         loss_curvature_bound = self.coverage @ CURVATURE_BOUNDS
-        max_sampling_distance = math.sqrt(self.max_envelope_gap / 8 / loss_curvature_bound)
+        max_sampling_distance = math.sqrt(
+            self.max_envelope_gap / 8 / loss_curvature_bound) if loss_curvature_bound > 0 else 1.0
         num_logits_sampled = math.ceil((logit_range_right - logit_range_left) / max_sampling_distance)
         logit_range = np.linspace(logit_range_left, logit_range_right, num_logits_sampled)
         return logit_range
@@ -323,7 +324,10 @@ class IntronCoverage:
 
 
 intron_coverage = IntronCoverage(coverage_mid)
-global_lb, envelope_points = intron_coverage.get_bound_and_envelope(-3, 5)
+
+logit_lb = -3
+logit_ub = 6
+global_lb, envelope_points = intron_coverage.get_bound_and_envelope(logit_lb, logit_ub)
 
 plt.plot(intron_coverage.logit_range, intron_coverage.sampled_loss, label='Loss', color='#1f77b4')
 
@@ -349,6 +353,12 @@ plt.plot(np.concatenate(([intron_coverage.logit_range[-1]], [
          color='skyblue',
          linestyle='--'
          )
+
+if not np.isinf(logit_lb):
+    plt.axvline(x=logit_lb, color='palegreen', linestyle='--')
+
+if not np.isinf(logit_ub):
+    plt.axvline(x=logit_ub, color='palegreen', linestyle='--')
 
 plt.xlabel('Logit')
 plt.ylabel('Loss')
