@@ -10,7 +10,8 @@ from dataclasses import dataclass, field
 from queue import PriorityQueue
 from typing import Optional, NamedTuple
 from scipy.spatial import ConvexHull
-from cvx_for_envelope import IntronCoverage, get_loss_by_logit
+from cvx_for_envelope import IntronCoverage, EnvelopePoints, get_loss_by_logit, NUM_POSITION_COVERAGE, fit_coverage, \
+    CoverageOptimResults
 
 from cvxpy.constraints import Constraint
 
@@ -35,7 +36,7 @@ def load_coverage_data() -> CoverageData:
         dataset_metadata = pickle.load(file)
 
     gene_data = gene_data_list[1]
-    design_matrix = dataset_metadata.design_matrix.numpy()    
+    design_matrix = dataset_metadata.design_matrix.numpy()
 
     intron_names = ['ENSMUSG00000073131_6']
     intron_coverages = {}
@@ -53,9 +54,9 @@ def load_coverage_data() -> CoverageData:
         intron_coverages=intron_coverages
     )
     return coverage_data
-    
-coverage_data = load_coverage_data()
 
+
+coverage_data = load_coverage_data()
 
 # %%
 
@@ -67,22 +68,33 @@ for intron_name in coverage_data.intron_names:
     for sample_id, feature_vector in coverage_data.feature_vectors.items():
         logits[(intron_name, sample_id)] = thetas[intron_name] + lfc_parameter @ feature_vector
 
+# Thetas fitted to aggregated coverages for each intron
+default_thetas: dict[str, float] = {}
+for intron_name in coverage_data.intron_names:
+    aggregated_intron_coverage = np.sum(
+        [coverage_data.intron_coverages[intron_name, sample_id].coverage for sample_id in
+         coverage_data.feature_vectors.keys()], axis=0)
+    optim_results = fit_coverage(aggregated_intron_coverage)
+    default_thetas[intron_name] = np.clip(optim_results.logit_optimal, -5.0, 5.0).item()
 
-best_thetas = {intron_name: np.zeros(theta.shape) for intron_name, theta in  thetas.items()}
-best_lfc_parameter = np.zeros(lfc_parameter.shape)
+default_lfc_parameter = np.zeros(lfc_parameter.shape)
+
+best_thetas = {intron_name: theta for intron_name, theta in default_thetas.items()}
+best_lfc_parameter = default_lfc_parameter.copy()
 
 best_feasible_loss = 0
 for key, intron_coverage in coverage_data.intron_coverages.items():
     intron_name, sample_id = key
     logit = best_thetas[intron_name] + np.dot(coverage_data.feature_vectors[sample_id], best_lfc_parameter)
     best_feasible_loss += get_loss_by_logit(logit, intron_coverage.coverage)
-    
-   
-#%%
+
+
+# %%
 
 class LogitBounds(NamedTuple):
     min_logit: float
     max_logit: float
+
 
 @dataclass
 class Node:
@@ -93,34 +105,55 @@ class Node:
     def __lt__(self, other):
         return self.parent_lower_bound < other.parent_lower_bound
 
+
 root_node = Node(parent_lower_bound=-np.inf,
-                  node_constraints=[])
+                 node_constraints=[])
 stack = PriorityQueue()
 stack.put(root_node)
 
 while not stack.empty():
-    node = stack.get()    
+    node = stack.get()
 
     if best_feasible_loss <= node.parent_lower_bound:
-        print("Prunning", f"{best_feasible_loss}", f"{node.parent_lower_bound}")
         continue
 
-    logit_bounds_by_sample: dict[int, LogitBounds] = {}
-    node_is_infeasible = False        
+    logit_bounds_by_intron_and_sample: dict[tuple[str, int], LogitBounds] = {}
+    node_is_infeasible = False
 
+    for key, logit in logits.items():
+        problem_min_logit = cp.Problem(cp.Minimize(logit), node.node_constraints)
+        min_logit = problem_min_logit.solve(solver=cp.GLPK)
+        if problem_min_logit.status == cp.INFEASIBLE:
+            node_is_infeasible = True
+            break
 
-#     # Iterate over samples/strata
-#     problem_min_logit = cp.Problem(cp.Minimize(logit), node.node_constraints)
-#     min_logit = problem_min_logit.solve(solver=cp.GLPK)   
+        problem_max_logit = cp.Problem(cp.Maximize(logit), node.node_constraints)
+        max_logit = problem_max_logit.solve(solver=cp.GLPK)
 
-#     problem_max_logit = cp.Problem(cp.Maximize(logit), node.node_constraints)
-#     max_logit = problem_max_logit.solve(solver=cp.GLPK)     
+        if problem_max_logit.status == cp.INFEASIBLE:
+            node_is_infeasible = True
+            break
 
-#     if problem_min_logit.status == cp.INFEASIBLE or problem_max_logit.status == cp.INFEASIBLE:          
-#         node_is_infeasible = True
+        logit_bounds_by_intron_and_sample[key] = LogitBounds(min_logit, max_logit)
 
-#     if node_is_infeasible:
-#         raise NotImplementedError() # handle infeasible nodes - continue the while loop
+    if node_is_infeasible:
+        continue
+
+    # Get lower bounds and envelopes, use the to construct cvx program
+    epigraph_variables: dict[(str, int), cp.Variable] = {}
+    program_constraints: list[Constraint] = []
+    for key, intron_coverage in coverage_data.intron_coverages.items():
+        logit_bounds = logit_bounds_by_intron_and_sample[key]
+        epigraph_lower_bound, envelope_points = intron_coverage.get_bound_and_envelope(logit_bounds.min_logit,
+                                                                                       logit_bounds.max_logit)
+        epigraph_variable = cp.Variable()
+        epigraph_variables[key] = epigraph_variable
+        program_constraints += [epigraph_variable >= epigraph_lower_bound]
+
+    objective = sum(epigraph_variables.values())
+
+    problem = cp.Problem(cp.Minimize(objective), program_constraints + node.node_constraints)
+    relaxed_loss = problem.solve()
 
 #     logit_bounds = LogitBounds(min_logit=min_logit,
 #                                max_logit=max_logit)
@@ -201,7 +234,7 @@ while not stack.empty():
 #             stack.put(child)
 
 
-#%%
+# %%
 # MAX_GAP_TOLERANCE = 0.01
 # num_position_coverage = 100
 # locations = np.linspace(1 / (2 * num_position_coverage), 1 - 1 / (2 * num_position_coverage), num_position_coverage)
