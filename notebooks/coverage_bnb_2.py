@@ -32,7 +32,7 @@ def load_coverage_data(collapse_samples_by_strata=True) -> CoverageData:
 
     gene_data = gene_data_list[1]
     design_matrix = dataset_metadata.design_matrix.numpy()
-    intron_names = ['ENSMUSG00000073131_3', 'ENSMUSG00000073131_4', 'ENSMUSG00000073131_5', 'ENSMUSG00000073131_6']
+    intron_names = ['ENSMUSG00000073131_4', 'ENSMUSG00000073131_5', 'ENSMUSG00000073131_6']
 
     intron_coverages: dict[IntronAndSample, IntronCoverage] = {}
 
@@ -68,8 +68,8 @@ def load_coverage_data(collapse_samples_by_strata=True) -> CoverageData:
 
         feature_vectors = {sample_id: row for sample_id, row in enumerate(design_matrix)}
 
-    intron_coverages = {key: intron_coverage for key, intron_coverage in intron_coverages.items() if
-                        intron_coverage.coverage.sum() > 0}
+    # intron_coverages = {key: intron_coverage for key, intron_coverage in intron_coverages.items() if
+    #                     intron_coverage.coverage.sum() > 0}
     coverage_data = CoverageData(
         intron_names=intron_names,
         feature_vectors=feature_vectors,
@@ -216,13 +216,14 @@ while not stack.empty():
     original_loss = 0.0
     largest_gap = -np.inf
     intron_and_sample_with_largest_gap = None
-    for intron_and_sample, epigraph_variable in epigraph_variables.items():
-        logit = logits[intron_and_sample]
-        # For unconstrained logits, model parameters are not assigned, we assign them default values
+    for intron_and_sample, epigraph_variable in epigraph_variables.items():        
+        # For unconstrained logits, model parameters are not assigned, so we assign them a default value
         if thetas[intron_and_sample.intron_name].value is None:
             thetas[intron_and_sample.intron_name].value = default_thetas[intron_and_sample.intron_name]
         if lfc_parameter.value is None:
             lfc_parameter.value = default_lfc_parameter
+            
+        logit = logits[intron_and_sample]
 
         intron_coverage = coverage_data.intron_coverages[intron_and_sample]
         original_loss_in_intron_and_sample = get_loss_by_logit(logit.value, intron_coverage.coverage)
@@ -259,6 +260,4 @@ while not stack.empty():
         stack.put(child_1)
         stack.put(child_2)
 
-    if len(node.node_constraints) > 20:
-        print("DEBUG BREAK")
-        break
+print(f"{num_nodes_searched=}")
