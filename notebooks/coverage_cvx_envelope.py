@@ -98,8 +98,16 @@ class CoverageOptimResults(NamedTuple):
     pi_constraints_active: bool
 
 
-def fit_coverage(coverage: np.ndarray) -> CoverageOptimResults:
+def fit_coverage(coverage: np.ndarray) -> CoverageOptimResults:    
     scaling_factor = np.sum(coverage)
+    if scaling_factor <= 0:
+        return CoverageOptimResults(
+            primal_objective=0.0,
+            dual_objective=0.0,
+            pi_optimal=0.5,
+            logit_optimal=logit_function(0.5),
+            pi_constraints_active=False)
+        
     coverage_normalized = coverage / scaling_factor
     pi = cp.Variable()
     arg = 1 + pi - 2 * pi * LOCATIONS
@@ -165,6 +173,8 @@ class IntronCoverage:
     def __init__(self, coverage: np.ndarray, max_envelope_gap=0.05) -> None:
         self.coverage = coverage
         self.max_envelope_gap = max_envelope_gap
+        
+        self.loss_is_constant_zero = True if self.coverage.sum() <= 0 else False
 
         self.optim_results = fit_coverage(coverage)
 
@@ -221,6 +231,11 @@ class IntronCoverage:
 
     @staticmethod
     def _create_envelope_from_points(points_x: np.ndarray, points_y: np.ndarray) -> EnvelopePoints:
+        if len(points_x) <= 1:
+            raise RuntimeError()
+        elif len(points_x) == 2:
+            return EnvelopePoints(points_x, points_y)
+
         points = np.column_stack([points_x, points_y])
         hull = ConvexHull(points)
         ring = hull.vertices  # CCW order around the hull
@@ -243,10 +258,13 @@ class IntronCoverage:
         return EnvelopePoints(x_chain, y_chain)
 
     def get_bound_and_envelope(self, logit_lb: float, logit_ub: float) -> tuple[float, Optional[EnvelopePoints]]:
+        if self.loss_is_constant_zero:
+            return (0.0, None)
         create_envelope = False
         envelope_lb: Optional[float] = None
         envelope_ub: Optional[float] = None
-        global_lb = self.optim_results.dual_objective
+        # It should always be dual <= primal objective, adding min() just in case of numerical issues
+        global_lb = min(self.optim_results.dual_objective, self.optim_results.primal_objective)
 
         if logit_lb == -np.inf:
             if logit_ub <= self.optim_results.logit_optimal:
@@ -315,6 +333,7 @@ class IntronCoverage:
             points_loss = np.concatenate(([sampled_loss_left],
                                           self.sampled_loss[envelope_lb_logit_index:envelope_ub_logit_index],
                                           [sampled_loss_right]))
+
             envelope_points_uncorrected = self._create_envelope_from_points(points_logit, points_loss)
             # Correct envelope loss by max. envelope gap
             envelope_points = EnvelopePoints(envelope_x=envelope_points_uncorrected.envelope_x,
@@ -364,79 +383,3 @@ plt.xlabel('Logit')
 plt.ylabel('Loss')
 plt.legend()
 plt.show()
-
-# max_envelope_gap=0.05
-# intron_coverage = IntronCoverage(coverage)
-
-# optim_results = fit_coverage(coverage)
-
-# loss_limit_right = get_loss_by_pi(1.0, coverage)
-# loss_limit_left = get_loss_by_pi(0.0, coverage)
-
-# logit_range_right = 1.0
-# logit_range_left = -1.0
-
-
-# while True:
-#     loss_range_right = get_loss_by_logit(logit_range_right, coverage)
-#     loss_derivative = get_loss_derivative_by_logit(logit_range_right, coverage)
-#     tail_bound_right = abs(loss_limit_right - loss_range_right) if loss_derivative >= 0 else abs(
-#         max(loss_range_right, loss_limit_right) - optim_results.dual_objective)
-#     if tail_bound_right <= max_envelope_gap:
-#         break
-#     logit_range_right += 1.0
-
-# while True:
-#     loss_range_left = get_loss_by_logit(logit_range_left, coverage)
-#     loss_derivative = get_loss_derivative_by_logit(logit_range_left, coverage)
-#     tail_bound_left = abs(loss_limit_left - loss_range_left) if loss_derivative <= 0 else abs(
-#         max(loss_range_left, loss_limit_left) -  optim_results.dual_objective)
-#     if tail_bound_left <= max_envelope_gap:
-#         break
-#     logit_range_left -= 1.0
-
-# print(logit_range_left, logit_range_right)
-
-# loss_curvature_bound = coverage @ CURVATURE_BOUNDS
-# max_sampling_distance = math.sqrt(max_envelope_gap / 8 / loss_curvature_bound)
-
-# num_logits_sampled = math.ceil((logit_range_right - logit_range_left) / max_sampling_distance)
-# logit_range = np.linspace(logit_range_left, logit_range_right, num_logits_sampled)
-# loss_range = np.array([get_loss_by_logit(logit, coverage) for logit in logit_range])
-
-
-# %%
-
-# coverage = coverage_mid
-# pi = cp.Variable()
-# arg = 1 + pi - 2 * pi * LOCATIONS
-# loss = -cp.log(arg) @ coverage
-
-# pi_lower_bound = pi >= 0
-# pi_upper_bound = pi <= 1
-# problem = cp.Problem(cp.Minimize(loss), [pi_lower_bound, pi_upper_bound])
-# minimum_value = problem.solve(solver=cp.SCS)
-# dual_objective = problem.solver_stats.extra_stats['info']['dobj']
-# pi_value = float(pi.value)
-
-# tolerance_dual = 1e-6
-# tolerance_pi_value = 1e-4
-
-# lower_bound_active = False
-# upper_bound_active = False
-
-# if abs(pi_lower_bound.dual_value) > tolerance_dual:
-#     lower_bound_active = True
-#     if not pi_value <= tolerance_pi_value:
-#         raise RuntimeError("Lower bound active, but pi not close to 0 ({pi_value=})")
-
-# if abs(pi_upper_bound.dual_value) > tolerance_dual:
-#     upper_bound_active = True
-#     if not pi_value >= 1 - tolerance_pi_value:
-#         raise RuntimeError("Upper bound active, but pi not close to  1 ({pi_value=})")
-
-# print(f"{pi_value=}")
-# print(f"{lower_bound_active=}")
-# print(f"{pi_lower_bound.dual_value=}")
-# print(f"{upper_bound_active=}")
-# print(f"{pi_upper_bound.dual_value=}")
