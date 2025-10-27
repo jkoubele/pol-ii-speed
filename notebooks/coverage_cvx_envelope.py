@@ -98,7 +98,7 @@ class CoverageOptimResults(NamedTuple):
     pi_constraints_active: bool
 
 
-def fit_coverage(coverage: np.ndarray) -> CoverageOptimResults:    
+def fit_coverage(coverage: np.ndarray) -> CoverageOptimResults:
     scaling_factor = np.sum(coverage)
     if scaling_factor <= 0:
         return CoverageOptimResults(
@@ -107,7 +107,7 @@ def fit_coverage(coverage: np.ndarray) -> CoverageOptimResults:
             pi_optimal=0.5,
             logit_optimal=logit_function(0.5),
             pi_constraints_active=False)
-        
+
     coverage_normalized = coverage / scaling_factor
     pi = cp.Variable()
     arg = 1 + pi - 2 * pi * LOCATIONS
@@ -173,7 +173,9 @@ class IntronCoverage:
     def __init__(self, coverage: np.ndarray, max_envelope_gap=0.05) -> None:
         self.coverage = coverage
         self.max_envelope_gap = max_envelope_gap
-        
+
+        self.cache: dict[tuple[float, float], tuple[float, Optional[EnvelopePoints]]] = {}
+
         self.loss_is_constant_zero = True if self.coverage.sum() <= 0 else False
 
         self.optim_results = fit_coverage(coverage)
@@ -260,6 +262,9 @@ class IntronCoverage:
     def get_bound_and_envelope(self, logit_lb: float, logit_ub: float) -> tuple[float, Optional[EnvelopePoints]]:
         if self.loss_is_constant_zero:
             return (0.0, None)
+        cached_results = self.cache.get((logit_lb, logit_ub))
+        if cached_results is not None:
+            return cached_results
         create_envelope = False
         envelope_lb: Optional[float] = None
         envelope_ub: Optional[float] = None
@@ -338,7 +343,7 @@ class IntronCoverage:
             # Correct envelope loss by max. envelope gap
             envelope_points = EnvelopePoints(envelope_x=envelope_points_uncorrected.envelope_x,
                                              envelope_y=envelope_points_uncorrected.envelope_y - self.max_envelope_gap)
-
+        self.cache[(logit_lb, logit_ub)] = (global_lb, envelope_points)
         return global_lb, envelope_points
 
 

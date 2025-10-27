@@ -2,6 +2,7 @@ import pickle
 from dataclasses import dataclass, field
 from queue import PriorityQueue
 from typing import Optional, NamedTuple
+from time import time
 
 import cvxpy as cp
 import numpy as np
@@ -9,7 +10,8 @@ from cvxpy.constraints import Constraint
 
 from coverage_cvx_envelope import IntronCoverage, get_loss_by_logit, fit_coverage
 
-MAX_GAP_TOLERANCE = 0.3
+
+MAX_GAP_TOLERANCE = 0.1
 
 
 class IntronAndSample(NamedTuple):
@@ -32,7 +34,7 @@ def load_coverage_data(collapse_samples_by_strata=True) -> CoverageData:
 
     gene_data = gene_data_list[1]
     design_matrix = dataset_metadata.design_matrix.numpy()
-    intron_names = ['ENSMUSG00000073131_4', 'ENSMUSG00000073131_5', 'ENSMUSG00000073131_6']
+    intron_names = ['ENSMUSG00000073131_3', 'ENSMUSG00000073131_4', 'ENSMUSG00000073131_5', 'ENSMUSG00000073131_6']
 
     intron_coverages: dict[IntronAndSample, IntronCoverage] = {}
 
@@ -153,6 +155,12 @@ root_node = Node(parent_lower_bound=-np.inf,
 stack = PriorityQueue()
 stack.put(root_node)
 
+t_start = time()
+time_lp_total = 0.0
+time_envelopes_total = 0.0
+time_cvx_program_total = 0.0
+time_solver_total = 0.0
+
 num_nodes_searched = 0
 while not stack.empty():
     node = stack.get()
@@ -164,6 +172,7 @@ while not stack.empty():
     logit_bounds_by_intron_and_sample: dict[IntronAndSample, LogitBounds] = {}
     node_is_infeasible = False
 
+    time_lp_start = time()
     for key, logit in logits.items():
         problem_min_logit = cp.Problem(cp.Minimize(logit), node.node_constraints)
         min_logit = problem_min_logit.solve(solver=cp.GLPK)
@@ -180,12 +189,15 @@ while not stack.empty():
 
         logit_bounds_by_intron_and_sample[key] = LogitBounds(min_logit, max_logit)
 
+    time_lp_total = time() - time_lp_start
     if node_is_infeasible:
         continue
+    
 
     # Get lower bounds and envelopes, use them to construct cvx program
     epigraph_variables: dict[IntronAndSample, cp.Variable] = {}
     program_constraints: list[Constraint] = []
+    time_envelopes_start = time()
     for intron_and_sample, intron_coverage in coverage_data.intron_coverages.items():
         logit_bounds = logit_bounds_by_intron_and_sample[intron_and_sample]
         epigraph_lower_bound, envelope_points = intron_coverage.get_bound_and_envelope(logit_bounds.min_logit,
@@ -201,11 +213,17 @@ while not stack.empty():
                 y_1 = envelope_points.envelope_y[i]
                 y_2 = envelope_points.envelope_y[i + 1]
                 program_constraints += [epigraph_variable >= y_1 + (logit - x_1) * (y_2 - y_1) / (x_2 - x_1)]
-
+    
+    time_envelopes_total += time() - time_envelopes_start 
     objective = sum(epigraph_variables.values())
 
     problem = cp.Problem(cp.Minimize(objective), program_constraints + node.node_constraints)
+    
+    time_cvx_program_start = time()    
+    
     relaxed_loss = problem.solve()
+    time_cvx_program_total += time() - time_cvx_program_start
+    time_solver_total += problem.solver_stats.solve_time
 
     if problem.status == cp.INFEASIBLE:
         continue
@@ -229,21 +247,21 @@ while not stack.empty():
         original_loss_in_intron_and_sample = get_loss_by_logit(logit.value, intron_coverage.coverage)
         original_loss += original_loss_in_intron_and_sample
         gap = original_loss_in_intron_and_sample - epigraph_variable.value
-        print(f"{intron_and_sample} has gap {gap=}")
+        # print(f"{intron_and_sample} has gap {gap=}")
         if gap > largest_gap:
             largest_gap = gap
             intron_and_sample_with_largest_gap = intron_and_sample
 
     if original_loss < best_feasible_loss:
-        print(50 * '*')
-        print(f"Updating best feasible loss {best_feasible_loss} -> {original_loss}")
-        print(50 * '*')
+        # print(50 * '*')
+        # print(f"Updating best feasible loss {best_feasible_loss} -> {original_loss}")
+        # print(50 * '*')
         best_feasible_loss = original_loss
         best_thetas = {intron_name: theta.value for intron_name, theta in thetas.items()}
         best_lfc_parameter = lfc_parameter.value
 
     if relaxed_loss + MAX_GAP_TOLERANCE < best_feasible_loss:
-        print(f"Expanding node {node=}")
+        # print(f"Expanding node {node=}")
         cut_1 = logits[intron_and_sample_with_largest_gap] >= logits[intron_and_sample_with_largest_gap].value
         cut_2 = logits[intron_and_sample_with_largest_gap] <= logits[intron_and_sample_with_largest_gap].value
 
@@ -259,5 +277,12 @@ while not stack.empty():
 
         stack.put(child_1)
         stack.put(child_2)
+        
+t_end = time()
+print(f"Time total: {t_end - t_start}")
+print(f"{time_lp_total=}")
+print(f"{time_envelopes_total=}")
+print(f"{time_cvx_program_total=}")
+print(f"{time_solver_total=}")
 
 print(f"{num_nodes_searched=}")
