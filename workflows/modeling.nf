@@ -55,6 +55,7 @@ process RunModel {
 
     output:
     path("model_results_*.csv"), optional: true, emit: model_result_chunks
+    path("./logs/*")
 
     publishDir "${params.outdir}/chunk_model_results/${chunk_name}", mode: 'copy'
 
