@@ -117,4 +117,4 @@ library_size_factors |>
 length_size_factors_genes |>
   as.data.frame() |>
   rownames_to_column(var = "gene_id") |>
-  write_tsv(file.path(output_folder, "length_size_factors.tsv"))
+  write_tsv(file.path(output_folder, "isoform_length_factors.tsv"))

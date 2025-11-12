@@ -61,10 +61,10 @@ if __name__ == "__main__":
     # import sys
     # sys.argv = [
     #         'script_name.py',
-    #         '--design_matrix', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/design_matrix/design_matrix.csv',
-    #         '--gene_names', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/gene_names_chunks/gene_names_chunk_01.csv',
-    #         '--exon_counts', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/aggregated_counts/exon_counts.tsv',
-    #         '--intron_counts', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/aggregated_counts/intron_counts.tsv',
+    #         '--design_matrix', '/home/jakub/Desktop/data/test_input/design_matrix.csv',
+    #         '--gene_names', '/home/jakub/Desktop/data/test_input/protein_coding_genes.csv',
+    #         '--exon_counts', '/home/jakub/Desktop/data/test_input/exon_counts.tsv',
+    #         '--intron_counts', '/home/jakub/Desktop/data/test_input/intron_counts.tsv',
     #         '--library_size_factors', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/aggregated_counts/library_size_factors.tsv',
     #         '--coverage_data_folder', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/rescaled_coverage',
     #         '--intron_specific_lfc', 'false',

@@ -109,6 +109,7 @@ workflow modeling_workflow {
         exon_counts_input
         intron_counts_input
         library_size_factors_input
+        isoform_length_factors_input
         coverage_files_input
         design_formula
         factor_reference_levels
