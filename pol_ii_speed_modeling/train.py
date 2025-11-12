@@ -50,7 +50,8 @@ def train_model(gene_data: GeneData,
     def closure():
         optimizer.zero_grad()
         predicted_reads_exon, predicted_reads_intron, pi = model(dataset_metadata.design_matrix,
-                                                                 dataset_metadata.log_library_sizes)
+                                                                 dataset_metadata.log_library_sizes,
+                                                                 gene_data.isoform_length_offset)
         loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                 reads_introns=gene_data.intron_reads,
                                 coverage=gene_data.coverage,
@@ -65,7 +66,8 @@ def train_model(gene_data: GeneData,
     def evaluate_loss():
         with torch.no_grad():
             predicted_reads_exon, predicted_reads_intron, pi = model(dataset_metadata.design_matrix,
-                                                                     dataset_metadata.log_library_sizes)
+                                                                     dataset_metadata.log_library_sizes,
+                                                                     gene_data.isoform_length_offset)
             return pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                     reads_introns=gene_data.intron_reads,
                                     coverage=gene_data.coverage,
@@ -147,7 +149,8 @@ def get_fisher_information_matrix(model: Pol2Model,
 
     def loss_by_model_parameters(model_parameters):
         outputs = functional_call(model, model_parameters, (dataset_metadata.design_matrix,
-                                                            dataset_metadata.log_library_sizes))
+                                                            dataset_metadata.log_library_sizes,
+                                                            gene_data.isoform_length_offset))
         predicted_reads_exon, predicted_reads_intron, pi = outputs
         return pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                 reads_introns=gene_data.intron_reads,

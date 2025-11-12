@@ -342,6 +342,7 @@ process AggregateReadCounts {
         path("exon_counts.tsv"), emit: exon_counts
         path("intron_counts.tsv"), emit: intron_counts
         path("library_size_factors.tsv"), emit: library_size_factors
+        path("isoform_length_factors.tsv"), emit: isoform_length_factors
 
     publishDir "${params.outdir}/aggregated_counts", mode: 'copy'
 
@@ -464,10 +465,11 @@ workflow preprocessing_workflow {
        .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
 
     emit:
-        gene_names_file        = gene_names.protein_coding_gene_names
-        exon_counts            = data_aggregation.exon_counts
-        intron_counts          = data_aggregation.intron_counts
-        library_size_factors   = data_aggregation.library_size_factors
-        coverage_files         = rescaled_coverage_combined
+        gene_names_file          = gene_names.protein_coding_gene_names
+        exon_counts              = data_aggregation.exon_counts
+        intron_counts            = data_aggregation.intron_counts
+        library_size_factors     = data_aggregation.library_size_factors
+        isoform_length_factors   = data_aggregation.isoform_length_factors
+        coverage_files           = rescaled_coverage_combined
 
 }

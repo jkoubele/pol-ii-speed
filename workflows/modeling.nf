@@ -48,6 +48,7 @@ process RunModel {
         path(exon_counts_matrix),
         path(intron_counts_matrix),
         path(library_size_factors),
+        path(isoform_length_factors),
         path(coverage_parquet_files),
         val(intron_specific_lfc)
     )
@@ -66,6 +67,7 @@ process RunModel {
     --exon_counts $exon_counts_matrix \
     --intron_counts $intron_counts_matrix \
     --library_size_factors $library_size_factors \
+    --isoform_length_factors $isoform_length_factors \
     --coverage_data_folder . \
     --intron_specific_lfc ${intron_specific_lfc} \
     --output_folder . \
@@ -109,6 +111,7 @@ workflow modeling_workflow {
         exon_counts_input
         intron_counts_input
         library_size_factors_input
+        isoform_length_factors_input
         coverage_files_input
         design_formula
         factor_reference_levels
@@ -133,6 +136,7 @@ workflow modeling_workflow {
             .combine(exon_counts_input)
             .combine(intron_counts_input)
             .combine(library_size_factors_input)
+            .combine(isoform_length_factors_input)
             // Wrapping coverage_files_input in an extra list prevents unwanted flattening behavior in .combine()
             .combine(coverage_files_input.map { file_list -> tuple([file_list]) })
             // Raw intron_specific_lfc is bool and cannot be used in combine()
