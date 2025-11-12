@@ -1,3 +1,5 @@
+#!/usr/bin/env Rscript
+
 library(tidyverse)
 library(argparse)
 
@@ -5,7 +7,7 @@ library(argparse)
 parser <- ArgumentParser()
 parser$add_argument("--model_results",
                     required = TRUE,
-                    help = "Path to model_results.csv")
+                    help = "Path to CSV file with model results.")
 parser$add_argument("--output_folder", default = '.')
 
 args <- parser$parse_args()
