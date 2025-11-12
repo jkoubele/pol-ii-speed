@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
 
-from pol_ii_speed_modeling.load_dataset import load_dataset_matedata, load_gene_data_list
+from pol_ii_speed_modeling.load_dataset import load_dataset_metadata, load_gene_data_list
 from pol_ii_speed_modeling.train import get_results_for_gene
 
 
@@ -41,6 +41,10 @@ if __name__ == "__main__":
                         type=Path,
                         required=True,
                         help='Path to the input .tsv file with library size factors.')
+    parser.add_argument('--isoform_length_factors',
+                        type=Path,
+                        required=True,
+                        help='Path to the input .tsv file with isoform length factors.')
     parser.add_argument('--coverage_data_folder',
                         type=Path,
                         required=True,
@@ -62,27 +66,29 @@ if __name__ == "__main__":
     # sys.argv = [
     #         'script_name.py',
     #         '--design_matrix', '/home/jakub/Desktop/data/test_input/design_matrix.csv',
-    #         '--gene_names', '/home/jakub/Desktop/data/test_input/protein_coding_genes.csv',
+    #         '--gene_names', '/home/jakub/Desktop/data/test_input/test_genes.csv',
     #         '--exon_counts', '/home/jakub/Desktop/data/test_input/exon_counts.tsv',
     #         '--intron_counts', '/home/jakub/Desktop/data/test_input/intron_counts.tsv',
-    #         '--library_size_factors', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/aggregated_counts/library_size_factors.tsv',
-    #         '--coverage_data_folder', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/rescaled_coverage',
+    #         '--library_size_factors', '/home/jakub/Desktop/data/test_input/library_size_factors.tsv',
+    #         '--isoform_length_factors', '/home/jakub/Desktop/data/test_input/isoform_length_factors.tsv',
+    #         '--coverage_data_folder', '/home/jakub/Desktop/data/test_input/rescaled_coverage/',
     #         '--intron_specific_lfc', 'false',
-    #         '--output_folder', '/cellfile/datapublic/jkoubele/drosophila_mutants/results/model_results',
-    #         '--output_basename', 'chunk_001'
+    #         '--output_folder', '/home/jakub/Desktop/data/model_results',
+    #         '--output_basename', 'test'
     #     ]
 
     args = parser.parse_args()
 
     output_folder = args.output_folder
     output_folder.mkdir(exist_ok=True, parents=True)
-    dataset_metadata = load_dataset_matedata(design_matrix_file=args.design_matrix,
+    dataset_metadata = load_dataset_metadata(design_matrix_file=args.design_matrix,
                                              library_size_factors_file=args.library_size_factors)
 
     gene_data_list = load_gene_data_list(gene_names_file=args.gene_names,
                                          exon_counts_file=args.exon_counts,
                                          intron_counts_file=args.intron_counts,
-                                         coverage_folder=Path(''),
+                                         isoform_length_factors_file=args.isoform_length_factors,
+                                         coverage_folder=args.coverage_data_folder,
                                          sample_names=dataset_metadata.sample_names,
                                          log_output_folder=Path("./logs"))
 
@@ -94,28 +100,3 @@ if __name__ == "__main__":
     if result_list:
         df_out = pd.concat(result_list).reset_index(drop=True)
         df_out.to_csv(output_folder / f"{args.output_basename}.csv", index=False)
-
-    # all_results: list[pd.DataFrame] = []
-    #
-    # for gene_data in tqdm(gene_data_list):
-    #     all_results.append(get_results_for_gene(gene_data=gene_data,
-    #                                             dataset_metadata=dataset_metadata,
-    #                                             perform_lrt=True,
-    #                                             intron_specific_lfc=False))
-    #
-    # df_out = pd.concat(all_results).reset_index(drop=True) if all_results else pd.DataFrame(
-    #     columns=['parameter_type', 'intron_name', 'feature_name', 'value', 'gene_name',
-    #              'loss_unrestricted', 'SE', 'z_score', 'p_value_wald', 'identifiable',
-    #              'loss_differences', 'loss_restricted', 'p_value_lrt'])
-    # df_out.to_csv(output_folder / f"{args.output_basename}.csv", index=False)
-
-    # design_matrix_df = pd.read_csv(args.design_matrix)
-    # gene_names_df = pd.read_csv(args.gene_names)
-    # exon_counts_df = pd.read_csv(args.exon_counts, sep='\t')
-    # intron_counts_df = pd.read_csv(args.intron_counts, sep='\t')
-    # library_size_factors_df = pd.read_csv(args.library_size_factors, sep='\t')
-    #
-    # df_out = gene_names_df.copy()
-    # df_out['dummy_results'] = df_out['gene_id'].apply(lambda x: f"Result for gene {x}")
-    #
-    # df_out.to_csv(output_folder / f"{args.output_basename}.csv", index=False)

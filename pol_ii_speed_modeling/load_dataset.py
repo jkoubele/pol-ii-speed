@@ -23,7 +23,7 @@ class IgnoringIntronReasons(StrEnum):
     NOT_ENOUGH_INTRON_READS = f'Intron has less than {MIN_SAMPLES_WITH_NONZERO_READ_COUNT} samples with non-zero read count.'
 
 
-def load_dataset_matedata(design_matrix_file: Path,
+def load_dataset_metadata(design_matrix_file: Path,
                           library_size_factors_file: Path) -> DatasetMetadata:
     design_matrix_df = pd.read_csv(design_matrix_file)
     library_size_factors_df = pd.read_csv(library_size_factors_file, sep='\t')
@@ -46,6 +46,7 @@ def load_dataset_matedata(design_matrix_file: Path,
 def load_gene_data_list(gene_names_file: Path,
                         exon_counts_file: Path,
                         intron_counts_file: Path,
+                        isoform_length_factors_file: Path,
                         coverage_folder: Path,
                         sample_names: list[str],
                         log_output_folder: Path) -> list[GeneData]:
@@ -57,6 +58,9 @@ def load_gene_data_list(gene_names_file: Path,
 
     intron_counts_df = pd.read_csv(intron_counts_file, sep='\t').set_index('intron_id')
     intron_counts_df = intron_counts_df[sample_names]
+
+    isoform_length_factors_df = pd.read_csv(isoform_length_factors_file, sep='\t').set_index('gene_id')
+    isoform_length_factors_df = isoform_length_factors_df[sample_names]
 
     gene_to_intron_names = defaultdict(list)
     for intron_name in intron_counts_df.index:
@@ -129,11 +133,16 @@ def load_gene_data_list(gene_names_file: Path,
 
         read_coverage = coverage_density * intron_reads.unsqueeze(2)
 
+        isoform_length_factors = torch.tensor(isoform_length_factors_df.loc[gene_id].values,
+                                              dtype=torch.float32)
+        isoform_length_offset = torch.log(isoform_length_factors)
+
         gene_data = GeneData(gene_name=gene_id,
                              intron_names=introns_to_keep,
                              exon_reads=exon_reads,
                              intron_reads=intron_reads,
-                             coverage=read_coverage)
+                             coverage=read_coverage,
+                             isoform_length_offset=isoform_length_offset)
         gene_data_list.append(gene_data)
 
     ignored_genes_df = pd.DataFrame(data={'gene': list(ignored_genes.keys()),
@@ -153,15 +162,17 @@ def load_dataset_from_results_folder(results_folder: Path,
     design_matrix_file = results_folder / 'design_matrix' / 'design_matrix.csv'
     library_size_factors_file = results_folder / 'aggregated_counts' / 'library_size_factors.tsv'
 
-    dataset_metadata = load_dataset_matedata(design_matrix_file, library_size_factors_file)
+    dataset_metadata = load_dataset_metadata(design_matrix_file, library_size_factors_file)
     gene_names_file = results_folder / 'gene_names' / gene_names_file_name
     exon_counts_file = results_folder / 'aggregated_counts' / 'exon_counts.tsv'
     intron_counts_file = results_folder / 'aggregated_counts' / 'intron_counts.tsv'
+    isoform_length_factors_file = results_folder / 'aggregated_counts' / 'isoform_length_factors.tsv'
     coverage_folder = results_folder / 'rescaled_coverage'
 
     gene_data_list = load_gene_data_list(gene_names_file=gene_names_file,
                                          exon_counts_file=exon_counts_file,
                                          intron_counts_file=intron_counts_file,
+                                         isoform_length_factors_file=isoform_length_factors_file,
                                          coverage_folder=coverage_folder,
                                          sample_names=dataset_metadata.sample_names,
                                          log_output_folder=log_output_folder
