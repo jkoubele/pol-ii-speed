@@ -21,12 +21,12 @@ if (!dir.exists(output_folder)) {
   dir.create(output_folder, recursive = TRUE)
 }
 
-input_files <- list.files(path = args$input_folder,
-                          pattern = "\\.csv$",
+input_files <- list.files(path = input_folder,
+                          pattern = "^model_results.*\\.csv$",
                           full.names = TRUE)
 
 if (length(input_files) == 0) {
-  stop("No matching CSV files found in input folder: ", args$input_folder)
+  stop("No matching CSV files found in input folder: ", input_folder)
 }
 
 merged_df <- sort(input_files) |>
@@ -58,3 +58,30 @@ if (all(is.na(cleaned_df$intron_name))) {
 }
 
 write_csv(cleaned_df, file.path(output_folder, 'model_results.csv'))
+
+
+ignored_introns_files <- sort(list.files(path = input_folder,
+                                    pattern = "^ignored_introns.*\\.csv$",
+                                    full.names = TRUE))
+
+if (length(ignored_introns_files) > 0) {
+ignored_introns_files |>
+    map(~ read_csv(.x, show_col_types = FALSE)) |>
+    list_rbind() |>
+    write_csv(file.path(output_folder, "ignored_introns.csv") )
+} else {
+  message("No ignored_introns*.csv files found in input folder: ", input_folder)
+}
+
+ignored_genes_files <- sort(list.files(path = input_folder,
+                                  pattern = "^ignored_genes.*\\.csv$",
+                                  full.names = TRUE))
+
+if (length(ignored_genes_files) > 0) {
+ ignored_genes_files |>
+    map(~ read_csv(.x, show_col_types = FALSE)) |>
+    list_rbind() |>
+    write_csv(file.path(output_folder, "ignored_genes.csv"))
+} else {
+  message("No ignored_genes*.csv files found in input folder: ", input_folder)
+}

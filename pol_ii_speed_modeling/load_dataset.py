@@ -49,7 +49,8 @@ def load_gene_data_list(gene_names_file: Path,
                         isoform_length_factors_file: Path,
                         coverage_folder: Path,
                         sample_names: list[str],
-                        log_output_folder: Path) -> list[GeneData]:
+                        log_output_folder: Path,
+                        log_output_name_suffix: str = '') -> list[GeneData]:
     log_output_folder.mkdir(exist_ok=True, parents=True)
     gene_names_df = pd.read_csv(gene_names_file)
 
@@ -149,8 +150,8 @@ def load_gene_data_list(gene_names_file: Path,
                                           'reason': list(ignored_genes.values())})
     ignored_introns_df = pd.DataFrame(data={'intron': list(ignored_introns.keys()),
                                             'reason': list(ignored_introns.values())})
-    ignored_genes_df.to_csv(log_output_folder / 'ignored_genes.csv', index=False)
-    ignored_introns_df.to_csv(log_output_folder / 'ignored_introns.csv', index=False)
+    ignored_genes_df.to_csv(log_output_folder / f'ignored_genes{log_output_name_suffix}.csv', index=False)
+    ignored_introns_df.to_csv(log_output_folder / f'ignored_introns{log_output_name_suffix}.csv', index=False)
 
     return gene_data_list
 

@@ -54,8 +54,9 @@ process RunModel {
     )
 
     output:
-    path("model_results_*.csv"), optional: true, emit: model_result_chunks
-    path("logs/*")
+    path("model_results*.csv"), optional: true, emit: model_result_chunks
+    path("logs/ignored_genes*.csv"),   emit: ignored_genes_logs
+    path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
 
     publishDir "${params.outdir}/chunk_model_results/${chunk_name}", mode: 'copy'
 
@@ -72,7 +73,7 @@ process RunModel {
     --coverage_data_folder . \
     --intron_specific_lfc ${intron_specific_lfc} \
     --output_folder . \
-    --output_basename model_results_${chunk_name}
+    --output_name_suffix _${chunk_name}
     """
 
 }
@@ -80,6 +81,8 @@ process RunModel {
 process MergeModelResultChunks {
     input:
     path model_result_chunks
+    path ignored_genes_logs
+    path ignored_introns_logs
     val design_formula
     val intron_specific_lfc
 
@@ -87,6 +90,8 @@ process MergeModelResultChunks {
     path("model_results.csv"), emit: model_results
     path("model_results_raw.csv")
     path ("model_parameters.txt")
+    path("ignored_genes.csv")
+    path("ignored_introns.csv")
 
     publishDir "${params.outdir}/model_results/${model_run_id}", mode: 'copy'
 
@@ -160,11 +165,19 @@ workflow modeling_workflow {
             // Raw intron_specific_lfc is bool and cannot be used in combine()
             .combine(Channel.value(intron_specific_lfc))
 
-        model_result_chunks = RunModel(model_input).model_result_chunks
-        collected_results_chunks = model_result_chunks
-                                   .filter { it != null }
-                                   .collect()
-        model_result_merged = MergeModelResultChunks(collected_results_chunks, design_formula, intron_specific_lfc)
+        def run_model_out = RunModel(model_input)
+
+        def collected_results_chunks       = run_model_out.model_result_chunks.filter { it != null }.collect()
+        def collected_ignored_genes_logs   = run_model_out.ignored_genes_logs.collect()
+        def collected_ignored_introns_logs = run_model_out.ignored_introns_logs.collect()
+
+        def model_result_merged = MergeModelResultChunks(
+            collected_results_chunks,
+            collected_ignored_genes_logs,
+            collected_ignored_introns_logs,
+            design_formula,
+            intron_specific_lfc
+        )
 
         CreateVolcanoPlots(model_result_merged.model_results)
 
