@@ -55,6 +55,7 @@ process RunModel {
 
     output:
     path("model_results_*.csv"), optional: true, emit: model_result_chunks
+    path("logs/*")
 
     publishDir "${params.outdir}/chunk_model_results/${chunk_name}", mode: 'copy'
 
@@ -104,6 +105,23 @@ EOF
 
 }
 
+process CreateVolcanoPlots {
+    input:
+    path model_results
+
+    output:
+    path("volcano_plots/*")
+
+    publishDir "${params.outdir}/model_results/${model_run_id}", mode: 'copy'
+
+    script:
+    """
+    create_volcano_plots.R \
+    --model_results $model_results \
+    --output_folder ./volcano_plots \
+    """
+}
+
 workflow modeling_workflow {
     take:
         samplesheet_input
@@ -146,6 +164,8 @@ workflow modeling_workflow {
         collected_results_chunks = model_result_chunks
                                    .filter { it != null }
                                    .collect()
-        MergeModelResultChunks(collected_results_chunks, design_formula, intron_specific_lfc)
+        model_result_merged = MergeModelResultChunks(collected_results_chunks, design_formula, intron_specific_lfc)
+
+        CreateVolcanoPlots(model_result_merged.model_results)
 
 }
