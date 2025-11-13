@@ -55,7 +55,7 @@ process RunModel {
 
     output:
     path("model_results_*.csv"), optional: true, emit: model_result_chunks
-    path("./logs/*")
+    path("logs/*")
 
     publishDir "${params.outdir}/chunk_model_results/${chunk_name}", mode: 'copy'
 
@@ -110,7 +110,7 @@ process CreateVolcanoPlots {
     path model_results
 
     output:
-    path("./volcano_plots/*")
+    path("volcano_plots/*")
 
     publishDir "${params.outdir}/model_results/${model_run_id}", mode: 'copy'
 
