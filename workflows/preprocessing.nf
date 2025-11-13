@@ -457,9 +457,10 @@ workflow preprocessing_workflow {
        def data_aggregation =  salmon_quant_out.salmon_quant
        .join(extracted_intronic_reads.intron_read_counts)
        .collect(flat: false).map { list_of_tuples ->
-            def sample_names = list_of_tuples*.getAt(0)
-            def quant_files  = list_of_tuples*.getAt(1)
-            def intron_files = list_of_tuples*.getAt(2)
+            def list_of_tuples_sorted = list_of_tuples.sort { it[0] }
+            def sample_names = list_of_tuples_sorted*.getAt(0)
+            def quant_files  = list_of_tuples_sorted*.getAt(1)
+            def intron_files = list_of_tuples_sorted*.getAt(2)
             tuple(sample_names, quant_files, intron_files)
        }
        .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
