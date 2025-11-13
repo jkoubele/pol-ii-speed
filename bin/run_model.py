@@ -57,10 +57,10 @@ if __name__ == "__main__":
                         type=Path,
                         default=Path('.'),
                         help='Output folder.')
-    parser.add_argument('--output_basename',
+    parser.add_argument('--output_name_suffix',
                         type=str,
-                        default='model_results',
-                        help='Basename of the output csv file.')
+                        default='',
+                        help='Suffix for the output CSV files.')
     # For development
     # import sys
     # sys.argv = [
@@ -90,7 +90,8 @@ if __name__ == "__main__":
                                          isoform_length_factors_file=args.isoform_length_factors,
                                          coverage_folder=args.coverage_data_folder,
                                          sample_names=dataset_metadata.sample_names,
-                                         log_output_folder=Path("./logs"))
+                                         log_output_folder=Path("./logs"),
+                                         log_output_name_suffix=args.output_name_suffix)
 
     result_list = [get_results_for_gene(gene_data=gene_data,
                                         dataset_metadata=dataset_metadata,
@@ -99,4 +100,4 @@ if __name__ == "__main__":
                    for gene_data in tqdm(gene_data_list)]
     if result_list:
         df_out = pd.concat(result_list).reset_index(drop=True)
-        df_out.to_csv(output_folder / f"{args.output_basename}.csv", index=False)
+        df_out.to_csv(output_folder / f"model_results{args.output_name_suffix}.csv", index=False)

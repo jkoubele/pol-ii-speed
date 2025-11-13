@@ -73,7 +73,7 @@ process RunModel {
     --coverage_data_folder . \
     --intron_specific_lfc ${intron_specific_lfc} \
     --output_folder . \
-    --output_basename model_results_${chunk_name}
+    --output_name_suffix _${chunk_name}
     """
 
 }
