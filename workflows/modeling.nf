@@ -54,9 +54,9 @@ process RunModel {
     )
 
     output:
-    path("model_results_*.csv"), optional: true, emit: model_result_chunks
-    path("logs/ignored_genes.csv"),   emit: ignored_genes_logs
-    path("logs/ignored_introns.csv"), emit: ignored_introns_logs
+    path("model_results*.csv"), optional: true, emit: model_result_chunks
+    path("logs/ignored_genes*.csv"),   emit: ignored_genes_logs
+    path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
 
     publishDir "${params.outdir}/chunk_model_results/${chunk_name}", mode: 'copy'
 
