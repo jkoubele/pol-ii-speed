@@ -23,11 +23,13 @@ class GeneData:
     exon_reads: torch.Tensor  # shape (num_samples,)
     intron_reads: torch.Tensor  # shape (num_samples, num_introns)
     coverage: torch.Tensor  # shape (num_samples, num_introns, num_coverage_bins)
+    isoform_length_offset: torch.Tensor  # shape (num_samples,)
 
     def to(self, device):
         self.exon_reads = self.exon_reads.to(device)
         self.intron_reads = self.intron_reads.to(device)
         self.coverage = self.coverage.to(device)
+        self.isoform_length_offset = self.isoform_length_offset.to(device)
         return self
 
 
@@ -96,7 +98,7 @@ class Pol2Model(nn.Module):
             intercept_exon_scalar = torch.log(gene_data.exon_reads.mean() / library_sizes.mean())
             self.intercept_exon.data[:] = intercept_exon_scalar  # preserve shape [1]
 
-            intercept_intron_vector = torch.log(gene_data.intron_reads.mean(axis=0) / library_sizes.mean() / 2)
+            intercept_intron_vector = torch.log(gene_data.intron_reads.mean(dim=0) / library_sizes.mean() / 2)
             self.intercept_intron.data.copy_(intercept_intron_vector)
 
     def set_parameter_mask(self,
@@ -138,13 +140,16 @@ class Pol2Model(nn.Module):
         else:
             raise RuntimeError(f"Unexpected parameter name: {param_name}")
 
-    def forward(self, design_matrix: torch.Tensor, log_library_sizes: torch.Tensor):
+    def forward(self,
+                design_matrix: torch.Tensor,
+                log_library_sizes: torch.Tensor,
+                isoform_length_offset: torch.Tensor):
         alpha = self.alpha if self.mask_alpha is None else self.mask_alpha.apply(self.alpha)
         beta = self.beta if self.mask_beta is None else self.mask_beta.apply(self.beta)
         gamma = self.gamma if self.mask_gamma is None else self.mask_gamma.apply(self.gamma)
 
         gene_expression_term = design_matrix @ alpha
-        predicted_log_reads_exon = (self.intercept_exon + log_library_sizes + gene_expression_term)
+        predicted_log_reads_exon = self.intercept_exon + log_library_sizes + isoform_length_offset + gene_expression_term
 
         speed_term = design_matrix @ beta
         splicing_term = design_matrix @ gamma
@@ -210,8 +215,8 @@ class CoverageLoss(nn.Module):
         location_term = 1 - 2 * locations
         self.register_buffer("location_term", location_term)
 
-    def forward(self, phi, coverage):
-        loss_per_location = -torch.log(1 + phi.unsqueeze(2) * self.location_term)
+    def forward(self, pi, coverage):
+        loss_per_location = -torch.log(1 + pi.unsqueeze(2) * self.location_term)
         return torch.sum(loss_per_location * coverage)
 
 

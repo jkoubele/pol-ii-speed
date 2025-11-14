@@ -38,6 +38,7 @@ workflow {
         def exon_counts
         def intron_counts
         def library_size_factors
+        def isoform_length_factors
         def coverage_files
 
         if (params.stage == 'model') {
@@ -45,6 +46,7 @@ workflow {
             exon_counts = Channel.value(file("${params.outdir}/aggregated_counts/exon_counts.tsv"))
             intron_counts = Channel.value(file("${params.outdir}/aggregated_counts/intron_counts.tsv"))
             library_size_factors = Channel.value(file("${params.outdir}/aggregated_counts/library_size_factors.tsv"))
+            isoform_length_factors = Channel.value(file("${params.outdir}/aggregated_counts/isoform_length_factors.tsv"))
             coverage_files = Channel.fromPath("${params.outdir}/rescaled_coverage/*.parquet")
                 .collect()
         }
@@ -54,6 +56,7 @@ workflow {
             exon_counts            = preproc_out.exon_counts
             intron_counts          = preproc_out.intron_counts
             library_size_factors   = preproc_out.library_size_factors
+            isoform_length_factors = preproc_out.isoform_length_factors
             coverage_files         = preproc_out.coverage_files
         }
 
@@ -63,6 +66,7 @@ workflow {
             exon_counts,
             intron_counts,
             library_size_factors,
+            isoform_length_factors,
             coverage_files,
             params.design_formula,
             params.factor_reference_levels,
