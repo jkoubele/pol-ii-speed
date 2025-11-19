@@ -174,7 +174,7 @@ process STARAlign {
 
     output:
         tuple val(sample), path("${sample}.Aligned.sortedByCoord.out.bam"), emit: star_bam
-        path("${sample}.Log.final.out")
+        path("${sample}.*")
 
     publishDir "${params.outdir}/star/${sample}", mode: 'copy'
 
@@ -262,7 +262,7 @@ process SalmonQuantification {
 
     output:
         tuple val(sample), path("${sample}.quant.sf"), emit: salmon_quant
-        tuple path("lib_format_counts.json"), path("logs/salmon_quant.log")
+        path("**")
 
     publishDir "${params.outdir}/salmon_quantification/${sample}", mode: 'copy'
 
