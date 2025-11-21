@@ -1,0 +1,12 @@
+[
+  {
+    "variable": "age",
+    "group1": "young",
+    "group2": "old"
+  },
+  {
+    "variable": "genotype",
+    "group1": "ama1",
+    "group2": "wt"
+  }
+]
