@@ -8,5 +8,8 @@
     "variable": "genotype",
     "group_1": "ama1",
     "group_2": "wt"
+  },
+  {
+    "variable": "dummy_continuous"
   }
 ]
