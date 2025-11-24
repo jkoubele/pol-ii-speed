@@ -24,11 +24,11 @@ if __name__ == "__main__":
     parser.add_argument('--design_matrix',
                         type=Path,
                         required=True,
-                        help='Path to the input .csv file with design matrix.')
+                        help='Path to the input CSV file with design matrix.')
     parser.add_argument('--gene_names',
                         type=Path,
                         required=True,
-                        help='Path to the input .csv file with gene names.')
+                        help='Path to the input CSV file with gene names.')
     parser.add_argument('--exon_counts',
                         type=Path,
                         required=True,
@@ -49,6 +49,14 @@ if __name__ == "__main__":
                         type=Path,
                         required=True,
                         help='Path to the folder with .parquet files with intron coverage.')
+    parser.add_argument('--lrt_metadata',
+                        type=Path,
+                        required=True,
+                        help='Path to the .csv file with LRT metadata.')
+    parser.add_argument('--reduced_matrices_folder',
+                        type=Path,
+                        required=True,
+                        help='Folder with CSV files with reduced matrices for LRT.')
     parser.add_argument('--intron_specific_lfc',
                         type=parse_bool_in_argparse,
                         required=True,
@@ -65,13 +73,15 @@ if __name__ == "__main__":
     import sys
     sys.argv = [
             'script_name.py',
-            '--design_matrix', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/output/design_matrix.csv',
+            '--design_matrix', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices//design_matrix.csv',
             '--gene_names', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/gene_names/test_genes.csv',
             '--exon_counts', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/exon_counts.tsv',
             '--intron_counts', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/intron_counts.tsv',
             '--library_size_factors', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/library_size_factors.tsv',
             '--isoform_length_factors', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/isoform_length_factors.tsv',
             '--coverage_data_folder', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/rescaled_coverage',
+            '--reduced_matrices_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/reduced_design_matrices',
+            '--lrt_metadata', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/lrt_tests_metadata.csv', 
             '--intron_specific_lfc', 'false',
             '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/model_results',
             '--output_name_suffix', 'test'
@@ -82,7 +92,9 @@ if __name__ == "__main__":
     output_folder = args.output_folder
     output_folder.mkdir(exist_ok=True, parents=True)
     dataset_metadata = load_dataset_metadata(design_matrix_file=args.design_matrix,
-                                             library_size_factors_file=args.library_size_factors)
+                                             library_size_factors_file=args.library_size_factors,
+                                             lrt_metadata_file=args.lrt_metadata,
+                                             reduced_matrices_folder=args.reduced_matrices_folder)
 
     gene_data_list = load_gene_data_list(gene_names_file=args.gene_names,
                                          exon_counts_file=args.exon_counts,

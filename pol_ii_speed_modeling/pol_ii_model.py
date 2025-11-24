@@ -40,12 +40,16 @@ class DatasetMetadata:
     log_library_sizes: torch.Tensor
     feature_names: list[str]
     sample_names: list[str]
+    lrt_metadata: pd.DataFrame
+    reduced_matrices: dict[str, torch.Tensor]
     num_coverage_bins: int = 100
 
     def to(self, device):
         self.design_matrix = self.design_matrix.to(device)
         self.library_sizes = self.library_sizes.to(device)
         self.log_library_sizes = self.log_library_sizes.to(device)
+        for name, matrix in self.reduced_matrices.items():
+            self.reduced_matrices[name] = matrix.to(device)
         return self
 
 

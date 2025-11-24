@@ -1,0 +1,17 @@
+[
+  {
+    "variable": "condition",
+    "group_1": "AZD8055",
+    "group_2": "Vehicle"
+  },
+  {
+    "variable": "condition",
+    "group_1": "Rapamycin",
+    "group_2": "Vehicle"
+  },
+  {
+    "variable": "condition",
+    "group_1": "AZD8055",
+    "group_2": "Rapamycin"
+  }
+]
