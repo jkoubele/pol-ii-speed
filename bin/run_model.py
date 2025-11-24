@@ -62,20 +62,20 @@ if __name__ == "__main__":
                         default='',
                         help='Suffix for the output CSV files.')
     # For development
-    # import sys
-    # sys.argv = [
-    #         'script_name.py',
-    #         '--design_matrix', '/home/jakub/Desktop/data/test_input/design_matrix.csv',
-    #         '--gene_names', '/home/jakub/Desktop/data/test_input/test_genes.csv',
-    #         '--exon_counts', '/home/jakub/Desktop/data/test_input/exon_counts.tsv',
-    #         '--intron_counts', '/home/jakub/Desktop/data/test_input/intron_counts.tsv',
-    #         '--library_size_factors', '/home/jakub/Desktop/data/test_input/library_size_factors.tsv',
-    #         '--isoform_length_factors', '/home/jakub/Desktop/data/test_input/isoform_length_factors.tsv',
-    #         '--coverage_data_folder', '/home/jakub/Desktop/data/test_input/rescaled_coverage/',
-    #         '--intron_specific_lfc', 'false',
-    #         '--output_folder', '/home/jakub/Desktop/data/model_results',
-    #         '--output_basename', 'test'
-    #     ]
+    import sys
+    sys.argv = [
+            'script_name.py',
+            '--design_matrix', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/output/design_matrix.csv',
+            '--gene_names', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/gene_names/test_genes.csv',
+            '--exon_counts', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/exon_counts.tsv',
+            '--intron_counts', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/intron_counts.tsv',
+            '--library_size_factors', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/library_size_factors.tsv',
+            '--isoform_length_factors', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/isoform_length_factors.tsv',
+            '--coverage_data_folder', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/rescaled_coverage',
+            '--intron_specific_lfc', 'false',
+            '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/model_results',
+            '--output_name_suffix', 'test'
+        ]
 
     args = parser.parse_args()
 
