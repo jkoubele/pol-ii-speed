@@ -16,10 +16,10 @@ parser$add_argument("--output_folder", default = ".",
 
 if (interactive()) {
   args <- list(
-    samplesheet = "/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/samplesheet_test.csv",
+    samplesheet = "/home/jakub/Desktop/pol-ii-speed/design_matrix_test/samplesheet_test.csv",
     formula = "~ age + genotype + dummy_continuous",
-    lrt_tests = "/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/lrt_tests.json",
-    output_folder = "/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/output"
+    lrt_tests = "/home/jakub/Desktop/pol-ii-speed/design_matrix_test/lrt_tests.json",
+    output_folder = "/home/jakub/Desktop/pol-ii-speed/design_matrix_test/output"
   )
 } else {
   args <- parser$parse_args()
@@ -38,15 +38,6 @@ if (!"sample" %in% names(samplesheet)) {
 lrt_tests <- list()
 if (!is.null(args$lrt_tests)) {
   lrt_tests <- fromJSON(args$lrt_tests, simplifyVector = FALSE)
-}
-
-term_columns <- function(design_matrix, formula_object, term_label) {
-  formula_terms <- terms(formula_object)
-  formula_term_labels <- attr(formula_terms, "term.labels")
-  term_index <- match(term_label, formula_term_labels)
-  if (is.na(term_index)) return(character())
-  assign_vector <- attr(design_matrix, "assign")
-  colnames(design_matrix)[assign_vector == term_index]
 }
 
 design_formula <- as.formula(args$formula)
@@ -100,20 +91,15 @@ for (i in seq_along(lrt_tests)) {
   lfc_column_negative <- ""
 
   if (is.numeric(samplesheet[[variable_name]])) {
-    # Continuous test
+    test_type <- "continuous"
+    
     if (!is.null(group_1) || !is.null(group_2)) {
       stop(sprintf("Continuous variable '%s' cannot specify comparison groups.", variable_name))
     }
-    if (!variable_name %in% full_term_labels) {
-      stop(sprintf("Variable '%s' is not present in formula '%s'.",
-                   variable_name, args$formula))
-    }
-
-    test_type <- "continuous"
+    stopifnot(variable_name %in% full_term_labels)
 
     reduced_terms <- setdiff(full_term_labels, variable_name)
-    reduced_formula_str <- if (length(reduced_terms) == 0) "~ 1"
-    else paste("~", paste(reduced_terms, collapse = " + "))
+    reduced_formula_str <- if (length(reduced_terms) == 0) "~ 1" else paste("~", paste(reduced_terms, collapse = " + "))
     reduced_formula <- as.formula(reduced_formula_str)
 
     reduced_design_matrix <- model.matrix(reduced_formula, samplesheet)
@@ -121,10 +107,7 @@ for (i in seq_along(lrt_tests)) {
     reduced_design_matrix <- reduced_design_matrix[, colnames(reduced_design_matrix) != "(Intercept)", drop = FALSE]
 
     lrt_df <- ncol(design_matrix) - ncol(reduced_design_matrix)
-
-    variable_column <- term_columns(design_matrix, design_formula, variable_name)
-    stopifnot(length(variable_column) == 1)
-    lfc_column_positive <- variable_column[1]
+    lfc_column_positive <- variable_name
     lfc_column_negative <- ""
 
     reduced_design_matrix_df <- reduced_design_matrix |>
@@ -138,13 +121,14 @@ for (i in seq_along(lrt_tests)) {
   } else {
     # Categorical test
     test_type <- "categorical"
+    stopifnot(variable_name %in% full_term_labels)
 
     samplesheet[[variable_name]] <- factor(samplesheet[[variable_name]])
     levels_full <- levels(samplesheet[[variable_name]])
     num_levels <- length(levels_full)
     stopifnot(num_levels >= 2)
 
-    # Auto-generate groups if BOTH missing (binary only)
+    # Auto-generate groups if both are missing (for binary variables only)
     if (is.null(group_1) && is.null(group_2)) {
       if (num_levels != 2) {
         stop(sprintf(
@@ -152,8 +136,8 @@ for (i in seq_along(lrt_tests)) {
           variable_name, num_levels
         ))
       }
-      group_1 <- levels_full[2]
-      group_2 <- levels_full[1]
+      group_1 <- levels_full[1]
+      group_2 <- levels_full[2]
     } else if (is.null(group_1) || is.null(group_2)) {
       stop("Only one comparison group was specified.")
     }
@@ -206,10 +190,8 @@ for (i in seq_along(lrt_tests)) {
       stop(sprintf("Could not find contrast column for %s: %s vs %s.",
                    variable_name, group_1, group_2))
     }
-    if (!col_drop %in% colnames(full_matrix_relevelled)) {
-      stop(sprintf("Column to drop '%s' not found in relevelled full matrix.", col_drop))
-    }
-
+    stopifnot(col_drop %in% colnames(full_matrix_relevelled))
+    
     reduced_design_matrix <- full_matrix_relevelled[, colnames(full_matrix_relevelled) != col_drop, drop = FALSE]
     lrt_df <- ncol(full_matrix_relevelled) - ncol(reduced_design_matrix)
     stopifnot(lrt_df == 1)
@@ -231,6 +213,7 @@ for (i in seq_along(lrt_tests)) {
     lfc_column_positive = lfc_column_positive,
     lfc_column_negative = lfc_column_negative
   )
+  
 }
 
 write_csv(lrt_metadata, file.path(output_folder, "lrt_tests_metadata.csv"))
