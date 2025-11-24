@@ -71,21 +71,31 @@ if __name__ == "__main__":
                         help='Suffix for the output CSV files.')
     # For development
     import sys
+
     sys.argv = [
-            'script_name.py',
-            '--design_matrix', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices//design_matrix.csv',
-            '--gene_names', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/gene_names/test_genes.csv',
-            '--exon_counts', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/exon_counts.tsv',
-            '--intron_counts', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/intron_counts.tsv',
-            '--library_size_factors', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/library_size_factors.tsv',
-            '--isoform_length_factors', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/isoform_length_factors.tsv',
-            '--coverage_data_folder', '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/rescaled_coverage',
-            '--reduced_matrices_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/reduced_design_matrices',
-            '--lrt_metadata', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/lrt_tests_metadata.csv', 
-            '--intron_specific_lfc', 'false',
-            '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/model_results',
-            '--output_name_suffix', 'test'
-        ]
+        'script_name.py',
+        '--design_matrix',
+        '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices//design_matrix.csv',
+        '--gene_names',
+        '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/gene_names/test_genes.csv',
+        '--exon_counts',
+        '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/exon_counts.tsv',
+        '--intron_counts',
+        '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/intron_counts.tsv',
+        '--library_size_factors',
+        '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/library_size_factors.tsv',
+        '--isoform_length_factors',
+        '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/isoform_length_factors.tsv',
+        '--coverage_data_folder',
+        '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/rescaled_coverage',
+        '--reduced_matrices_folder',
+        '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/reduced_design_matrices',
+        '--lrt_metadata',
+        '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/lrt_tests_metadata.csv',
+        '--intron_specific_lfc', 'false',
+        '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/model_results',
+        '--output_name_suffix', 'test'
+    ]
 
     args = parser.parse_args()
 
@@ -107,7 +117,6 @@ if __name__ == "__main__":
 
     result_list = [get_results_for_gene(gene_data=gene_data,
                                         dataset_metadata=dataset_metadata,
-                                        perform_lrt=True,
                                         intron_specific_lfc=args.intron_specific_lfc)
                    for gene_data in tqdm(gene_data_list)]
     if result_list:
