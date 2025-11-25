@@ -94,7 +94,7 @@ if __name__ == "__main__":
         '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/lrt_tests_metadata.csv',
         '--intron_specific_lfc', 'false',
         '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/model_results',
-        '--output_name_suffix', 'test'
+        '--output_name_suffix', '_test'
     ]
 
     args = parser.parse_args()

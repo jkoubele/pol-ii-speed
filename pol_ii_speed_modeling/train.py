@@ -1,13 +1,12 @@
-from dataclasses import dataclass
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 import scipy
 import torch
+from dataclasses import dataclass
 from scipy import stats
 from torch import optim
 from torch.func import functional_call, hessian
+from typing import Optional
 
 from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
 
@@ -241,33 +240,29 @@ def get_results_for_gene(gene_data: GeneData,
 
     loss_differences: list[Optional[float]] = []
 
-    for _, row in param_df.iterrows():
-        if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
-            loss_differences.append(None)
-        else:
-            model_restricted = Pol2Model(feature_names=dataset_metadata.feature_names,
-                                         intron_names=gene_data.intron_names,
-                                         intron_specific_lfc=intron_specific_lfc).to(device)
-            model_restricted.load_state_dict(model.state_dict())
+    # for _, row in param_df.iterrows():
+    #     if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
+    #         loss_differences.append(None)
+    #     else:
+    #         model_restricted = Pol2Model(feature_names=dataset_metadata.feature_names,
+    #                                      intron_names=gene_data.intron_names,
+    #                                      intron_specific_lfc=intron_specific_lfc).to(device)
+    #
+    #         # TODO: Add logic for LRT
+    #         # model_restricted.load_state_dict(model.state_dict())
+    #
+    #         model_restricted, training_results = train_model(gene_data=gene_data,
+    #                                                          dataset_metadata=dataset_metadata,
+    #                                                          pol_2_total_loss=pol_2_total_loss,
+    #                                                          device=device,
+    #                                                          model=model_restricted,
+    #                                                          intron_specific_lfc=intron_specific_lfc)
+    #         if training_results.converged_within_max_epochs:
+    #             loss_differences.append(training_results.final_loss - loss_unrestricted)
+    #         else:
+    #             loss_differences.append(None)
 
-            model_restricted.set_parameter_mask(
-                param_name=row['parameter_type'],
-                feature_name=row['feature_name'],
-                intron_name=None if (not intron_specific_lfc or row['parameter_type'] == 'alpha') else row[
-                    'intron_name'],
-                value=0.0)
-            model_restricted, training_results = train_model(gene_data=gene_data,
-                                                             dataset_metadata=dataset_metadata,
-                                                             pol_2_total_loss=pol_2_total_loss,
-                                                             device=device,
-                                                             model=model_restricted,
-                                                             intron_specific_lfc=intron_specific_lfc)
-            if training_results.converged_within_max_epochs:
-                loss_differences.append(training_results.final_loss - loss_unrestricted)
-            else:
-                loss_differences.append(None)
-
-        param_df['loss_differences'] = loss_differences
-        param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
-        param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
+    # param_df['loss_differences'] = loss_differences
+    # param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
+    # param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
     return param_df
