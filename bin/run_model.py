@@ -94,7 +94,7 @@ if __name__ == "__main__":
         '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/lrt_tests_metadata.csv',
         '--intron_specific_lfc', 'false',
         '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/model_results',
-        '--output_name_suffix', '_test'
+        '--output_name_suffix', '_dev'
     ]
 
     args = parser.parse_args()
@@ -114,11 +114,16 @@ if __name__ == "__main__":
                                          sample_names=dataset_metadata.sample_names,
                                          log_output_folder=Path("./logs"),
                                          log_output_name_suffix=args.output_name_suffix)
+    
+    gene_data_list = gene_data_list[2:4] #TODO: only for dev, remove for prod!
 
-    result_list = [get_results_for_gene(gene_data=gene_data,
-                                        dataset_metadata=dataset_metadata,
-                                        intron_specific_lfc=args.intron_specific_lfc)
-                   for gene_data in tqdm(gene_data_list)]
-    if result_list:
-        df_out = pd.concat(result_list).reset_index(drop=True)
-        df_out.to_csv(output_folder / f"model_results{args.output_name_suffix}.csv", index=False)
+    if gene_data_list:  # gene_data_list may be empty if all genes are filtered out in the load_gene_data_list()
+        result_list = [get_results_for_gene(gene_data=gene_data,
+                                            dataset_metadata=dataset_metadata,
+                                            intron_specific_lfc=args.intron_specific_lfc)
+                       for gene_data in tqdm(gene_data_list)]
+        all_model_param_df = pd.concat([result[0] for result in result_list]).reset_index(drop=True)
+        all_test_results_df = pd.concat([result[1] for result in result_list]).reset_index(drop=True)
+
+        all_model_param_df.to_csv(output_folder / f"model_parameters{args.output_name_suffix}.csv", index=False)
+        all_test_results_df.to_csv(output_folder / f"test_results{args.output_name_suffix}.csv", index=False)

@@ -8,7 +8,8 @@ from torch import optim
 from torch.func import functional_call, hessian
 from typing import Optional
 
-from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model
+from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model, TestableParameters, \
+    LRTSpecification
 
 LOSS_CLAMP_VALUE = 1e30
 
@@ -22,21 +23,16 @@ class TrainingResults:
     training_diverged: bool
 
 
-def train_model(gene_data: GeneData,
+def train_model(model: Pol2Model,
+                gene_data: GeneData,
                 dataset_metadata: DatasetMetadata,
                 pol_2_total_loss: Pol2TotalLoss,
+                reduced_matrix_name: Optional[str] = None,
                 device='cpu',
                 max_epochs=200,
                 max_patience=5,
-                loss_change_tolerance=1e-6,
-                model: Optional[Pol2Model] = None,
-                intron_specific_lfc=True
-                ) -> tuple[Pol2Model, TrainingResults]:
-    if model is None:
-        model = Pol2Model(feature_names=dataset_metadata.feature_names,
-                          intron_names=gene_data.intron_names,
-                          intron_specific_lfc=intron_specific_lfc).to(device)
-        model.initialize_intercepts(gene_data, dataset_metadata.library_sizes)
+                loss_change_tolerance=1e-6) -> tuple[Pol2Model, TrainingResults]:
+    reduced_matrix = None if reduced_matrix_name is None else dataset_metadata.reduced_matrices[reduced_matrix_name]
 
     optimizer = optim.LBFGS(model.parameters(),
                             lr=0.05,
@@ -48,9 +44,10 @@ def train_model(gene_data: GeneData,
 
     def closure():
         optimizer.zero_grad()
-        predicted_reads_exon, predicted_reads_intron, pi = model(dataset_metadata.design_matrix,
-                                                                 dataset_metadata.log_library_sizes,
-                                                                 gene_data.isoform_length_offset)
+        predicted_reads_exon, predicted_reads_intron, pi = model(design_matrix=dataset_metadata.design_matrix,
+                                                                 log_library_sizes=dataset_metadata.log_library_sizes,
+                                                                 isoform_length_offset=gene_data.isoform_length_offset,
+                                                                 reduced_design_matrix=reduced_matrix)
         loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                 reads_introns=gene_data.intron_reads,
                                 coverage=gene_data.coverage,
@@ -64,9 +61,10 @@ def train_model(gene_data: GeneData,
 
     def evaluate_loss():
         with torch.no_grad():
-            predicted_reads_exon, predicted_reads_intron, pi = model(dataset_metadata.design_matrix,
-                                                                     dataset_metadata.log_library_sizes,
-                                                                     gene_data.isoform_length_offset)
+            predicted_reads_exon, predicted_reads_intron, pi = model(design_matrix=dataset_metadata.design_matrix,
+                                                                     log_library_sizes=dataset_metadata.log_library_sizes,
+                                                                     isoform_length_offset=gene_data.isoform_length_offset,
+                                                                     reduced_design_matrix=reduced_matrix)
             return pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                     reads_introns=gene_data.intron_reads,
                                     coverage=gene_data.coverage,
@@ -210,59 +208,94 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
 
 def get_results_for_gene(gene_data: GeneData,
                          dataset_metadata: DatasetMetadata,
-                         device='cpu',
-                         intron_specific_lfc=True) -> pd.DataFrame:
+                         intron_specific_lfc: bool,
+                         device='cpu'
+                         ) -> tuple[pd.DataFrame, pd.DataFrame]:
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
     pol_2_total_loss = Pol2TotalLoss().to(device)
 
-    model, training_results = train_model(gene_data=gene_data,
-                                          dataset_metadata=dataset_metadata,
-                                          pol_2_total_loss=pol_2_total_loss,
-                                          device=device,
-                                          intron_specific_lfc=intron_specific_lfc)
+    model_full = Pol2Model(feature_names=dataset_metadata.feature_names,
+                           intron_names=gene_data.intron_names,
+                           intron_specific_lfc=intron_specific_lfc).to(device)
+    model_full.initialize_intercepts(gene_data, dataset_metadata.library_sizes)
 
-    param_df = model.get_param_df()
-    param_df['gene_name'] = gene_data.gene_name
-    param_df['loss_unrestricted'] = training_results.final_loss
-    param_df['unrestricted_training_diverged'] = training_results.training_diverged
-    param_df['unrestricted_training_converged_within_max_epochs'] = training_results.converged_within_max_epochs
+    model_full, training_results_full = train_model(model=model_full,
+                                                    gene_data=gene_data,
+                                                    dataset_metadata=dataset_metadata,
+                                                    pol_2_total_loss=pol_2_total_loss,
+                                                    device=device)
+
+    model_param_df = model_full.get_param_df()
+    model_param_df['gene_name'] = gene_data.gene_name
+    model_param_df['loss_full_model'] = training_results_full.final_loss
+    model_param_df['training_diverged_full_model'] = training_results_full.training_diverged
+    model_param_df[
+        'training_converged_within_max_epochs_full_model'] = training_results_full.converged_within_max_epochs
 
     # Wald test
-    fisher_information_matrix = get_fisher_information_matrix(model=model,
+    fisher_information_matrix = get_fisher_information_matrix(model=model_full,
                                                               pol_2_total_loss=pol_2_total_loss,
                                                               gene_data=gene_data,
                                                               dataset_metadata=dataset_metadata)
-    param_df = add_wald_test_results(param_df, fisher_information_matrix)
+    model_param_df = add_wald_test_results(model_param_df, fisher_information_matrix)
+    model_param_df = model_param_df.set_index(["parameter_type", "feature_name", "intron_name"], drop=False)
 
-    # LRT
-    loss_unrestricted = training_results.final_loss
+    test_results_list: list[dict] = []
+    for _, lrt_metadata_row in dataset_metadata.lrt_metadata.iterrows():
+        reduced_design_matrix = dataset_metadata.reduced_matrices[lrt_metadata_row['test_name']]
+        for tested_parameter in TestableParameters:
+            intron_names = gene_data.intron_names if intron_specific_lfc else [None]
+            for intron_name in intron_names:
+                lrt_specification = LRTSpecification(num_features_reduced_matrix=reduced_design_matrix.shape[1],
+                                                     tested_parameter=tested_parameter,
+                                                     tested_intron=intron_name)
 
-    loss_differences: list[Optional[float]] = []
+                model_reduced = Pol2Model(feature_names=dataset_metadata.feature_names,
+                                          intron_names=gene_data.intron_names,
+                                          intron_specific_lfc=intron_specific_lfc,
+                                          lrt_specification=lrt_specification).to(device)
 
-    # for _, row in param_df.iterrows():
-    #     if row['parameter_type'] not in ('alpha', 'beta', 'gamma'):
-    #         loss_differences.append(None)
-    #     else:
-    #         model_restricted = Pol2Model(feature_names=dataset_metadata.feature_names,
-    #                                      intron_names=gene_data.intron_names,
-    #                                      intron_specific_lfc=intron_specific_lfc).to(device)
-    #
-    #         # TODO: Add logic for LRT
-    #         # model_restricted.load_state_dict(model.state_dict())
-    #
-    #         model_restricted, training_results = train_model(gene_data=gene_data,
-    #                                                          dataset_metadata=dataset_metadata,
-    #                                                          pol_2_total_loss=pol_2_total_loss,
-    #                                                          device=device,
-    #                                                          model=model_restricted,
-    #                                                          intron_specific_lfc=intron_specific_lfc)
-    #         if training_results.converged_within_max_epochs:
-    #             loss_differences.append(training_results.final_loss - loss_unrestricted)
-    #         else:
-    #             loss_differences.append(None)
+                # TODO: hot-start the restricted model from the unrestricted model
+                state_dict_model_full = model_full.state_dict()
+                hot_start_state_dict = model_reduced.state_dict()
+                for key, value in state_dict_model_full.items():
+                    hot_start_state_dict[key] = value
+                    
+                model_reduced.load_state_dict(hot_start_state_dict)
+                model_reduced, training_results_reduced = train_model(model=model_reduced,
+                                                                      gene_data=gene_data,
+                                                                      dataset_metadata=dataset_metadata,
+                                                                      pol_2_total_loss=pol_2_total_loss,
+                                                                      device=device,
+                                                                      reduced_matrix_name=lrt_metadata_row[
+                                                                          'test_name'])
 
-    # param_df['loss_differences'] = loss_differences
-    # param_df['loss_restricted'] = param_df['loss_unrestricted'] + param_df['loss_differences']
-    # param_df['p_value_lrt'] = 1 - stats.chi2.cdf(2 * param_df['loss_differences'], df=1)
-    return param_df
+                test_result = lrt_metadata_row.to_dict()
+                test_result['tested_parameter'] = lrt_specification.tested_parameter
+                test_result['tested_intron'] = lrt_specification.tested_intron
+
+                test_result['training_diverged_reduced_model'] = training_results_reduced.training_diverged
+                test_result[
+                    'training_converged_within_max_epochs_reduced_model'] = training_results_reduced.converged_within_max_epochs
+
+                lfc_value_positive = 0 if pd.isna(test_result['lfc_column_positive']) else model_param_df.loc[
+                    (lrt_specification.tested_parameter, test_result['lfc_column_positive'],
+                     lrt_specification.tested_intron)]['value']
+
+                lfc_value_negative = 0 if pd.isna(test_result['lfc_column_negative']) else model_param_df.loc[
+                    (lrt_specification.tested_parameter, test_result['lfc_column_negative'],
+                     lrt_specification.tested_intron)]['value']
+
+                test_result['lfc'] = lfc_value_positive - lfc_value_negative
+                test_result['loss_full_model'] = training_results_full.final_loss
+                test_result['loss_reduced_model'] = training_results_reduced.final_loss
+                test_result['chi_2_test_statistics'] = 2 * (
+                        training_results_reduced.final_loss - training_results_full.final_loss)
+                test_result['p_value_lrt'] = 1 - stats.chi2.cdf(test_result['chi_2_test_statistics'],
+                                                            df=test_result['lrt_df'])
+
+                test_results_list.append(test_result)
+
+    test_results_df = pd.DataFrame(test_results_list)
+    return model_param_df, test_results_df

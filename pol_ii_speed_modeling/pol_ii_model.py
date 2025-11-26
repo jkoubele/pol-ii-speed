@@ -99,7 +99,7 @@ class Pol2Model(nn.Module):
         if self.lrt_specification is not None:
             self.reduced_lfc = nn.Parameter(torch.zeros(self.lrt_specification.num_features_reduced_matrix))
             self.tested_intron_index: Optional[
-                int] = None if self.lrt_specification.tested_parameter == TestableParameters.ALPHA else self.intron_names.index(
+                int] = None if not intron_specific_lfc or self.lrt_specification.tested_parameter == TestableParameters.ALPHA else self.intron_names.index(
                 self.lrt_specification.tested_intron)
 
     def initialize_intercepts(self, gene_data: GeneData, library_sizes: torch.Tensor) -> None:
