@@ -14,16 +14,8 @@ parser$add_argument("--lrt_tests", default = NULL,
 parser$add_argument("--output_folder", default = ".",
                     help = "Where to write design matrices and metadata.")
 
-if (interactive()) {
-  args <- list(
-    samplesheet = "/home/jakub/Desktop/pol-ii-speed/design_matrix_test/samplesheet_test.csv",
-    formula = "~ age + genotype + dummy_continuous",
-    lrt_tests = "/home/jakub/Desktop/pol-ii-speed/design_matrix_test/lrt_tests.json",
-    output_folder = "/home/jakub/Desktop/pol-ii-speed/design_matrix_test/output"
-  )
-} else {
-  args <- parser$parse_args()
-}
+args <- parser$parse_args()
+
 
 output_folder <- args$output_folder
 output_folder_reduced_matrices <- file.path(output_folder, "reduced_design_matrices")
@@ -66,7 +58,7 @@ lrt_metadata <- tibble(
 )
 
 if (length(lrt_tests) == 0) {
-  write_csv(lrt_metadata, file.path(output_folder, "lrt_tests_metadata.csv"))
+  write_csv(lrt_metadata, file.path(output_folder, "lrt_metadata.csv"))
   warning("No LRT specification provided, creating only design matrix to estimate effect sizes.")
   quit(status = 0)
 }
@@ -92,7 +84,7 @@ for (i in seq_along(lrt_tests)) {
 
   if (is.numeric(samplesheet[[variable_name]])) {
     test_type <- "continuous"
-    
+
     if (!is.null(group_1) || !is.null(group_2)) {
       stop(sprintf("Continuous variable '%s' cannot specify comparison groups.", variable_name))
     }
@@ -191,7 +183,7 @@ for (i in seq_along(lrt_tests)) {
                    variable_name, group_1, group_2))
     }
     stopifnot(col_drop %in% colnames(full_matrix_relevelled))
-    
+
     reduced_design_matrix <- full_matrix_relevelled[, colnames(full_matrix_relevelled) != col_drop, drop = FALSE]
     lrt_df <- ncol(full_matrix_relevelled) - ncol(reduced_design_matrix)
     stopifnot(lrt_df == 1)
@@ -213,7 +205,7 @@ for (i in seq_along(lrt_tests)) {
     lfc_column_positive = lfc_column_positive,
     lfc_column_negative = lfc_column_negative
   )
-  
+
 }
 
 write_csv(lrt_metadata, file.path(output_folder, "lrt_tests_metadata.csv"))
