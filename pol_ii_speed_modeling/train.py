@@ -245,7 +245,8 @@ def get_results_for_gene(gene_data: GeneData,
     for _, lrt_metadata_row in dataset_metadata.lrt_metadata.iterrows():
         reduced_design_matrix = dataset_metadata.reduced_matrices[lrt_metadata_row['test_name']]
         for tested_parameter in TestableParameters:
-            intron_names = gene_data.intron_names if intron_specific_lfc else [None]
+            intron_names = gene_data.intron_names if intron_specific_lfc and tested_parameter in (
+            TestableParameters.BETA, TestableParameters.GAMMA) else [None]
             for intron_name in intron_names:
                 lrt_specification = LRTSpecification(num_features_reduced_matrix=reduced_design_matrix.shape[1],
                                                      tested_parameter=tested_parameter,
@@ -256,12 +257,22 @@ def get_results_for_gene(gene_data: GeneData,
                                           intron_specific_lfc=intron_specific_lfc,
                                           lrt_specification=lrt_specification).to(device)
 
-                # TODO: hot-start the restricted model from the unrestricted model
                 state_dict_model_full = model_full.state_dict()
                 hot_start_state_dict = model_reduced.state_dict()
                 for key, value in state_dict_model_full.items():
                     hot_start_state_dict[key] = value
-                    
+
+                if reduced_design_matrix.shape[1] > 0:
+                    if lrt_specification.tested_parameter == TestableParameters.ALPHA:
+                        lfc_full_model = state_dict_model_full[lrt_specification.tested_parameter]
+                    else:
+                        intron_index = 0 if not model_full.intron_specific_lfc else model_full.intron_names.index(
+                            lrt_specification.tested_intron)
+                        lfc_full_model = state_dict_model_full[lrt_specification.tested_parameter][:, intron_index]
+                    # Initialize LFC in reduced model via least squares
+                    hot_start_state_dict['reduced_lfc'] = torch.linalg.lstsq(reduced_design_matrix,
+                                                                             dataset_metadata.design_matrix @ lfc_full_model).solution
+
                 model_reduced.load_state_dict(hot_start_state_dict)
                 model_reduced, training_results_reduced = train_model(model=model_reduced,
                                                                       gene_data=gene_data,
@@ -293,7 +304,7 @@ def get_results_for_gene(gene_data: GeneData,
                 test_result['chi_2_test_statistics'] = 2 * (
                         training_results_reduced.final_loss - training_results_full.final_loss)
                 test_result['p_value_lrt'] = 1 - stats.chi2.cdf(test_result['chi_2_test_statistics'],
-                                                            df=test_result['lrt_df'])
+                                                                df=test_result['lrt_df'])
 
                 test_results_list.append(test_result)
 
