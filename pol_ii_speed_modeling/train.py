@@ -28,7 +28,6 @@ def train_model(model: Pol2Model,
                 dataset_metadata: DatasetMetadata,
                 pol_2_total_loss: Pol2TotalLoss,
                 reduced_matrix_name: Optional[str] = None,
-                device='cpu',
                 max_epochs=200,
                 max_patience=5,
                 loss_change_tolerance=1e-6) -> tuple[Pol2Model, TrainingResults]:
@@ -223,8 +222,7 @@ def get_results_for_gene(gene_data: GeneData,
     model_full, training_results_full = train_model(model=model_full,
                                                     gene_data=gene_data,
                                                     dataset_metadata=dataset_metadata,
-                                                    pol_2_total_loss=pol_2_total_loss,
-                                                    device=device)
+                                                    pol_2_total_loss=pol_2_total_loss)
 
     model_param_df = model_full.get_param_df()
     model_param_df['gene_name'] = gene_data.gene_name
@@ -243,10 +241,10 @@ def get_results_for_gene(gene_data: GeneData,
 
     test_results_list: list[dict] = []
     for _, lrt_metadata_row in dataset_metadata.lrt_metadata.iterrows():
-        reduced_design_matrix = dataset_metadata.reduced_matrices[lrt_metadata_row['test_name']]
+        reduced_design_matrix = dataset_metadata.reduced_matrices[lrt_metadata_row['test_id']]
         for tested_parameter in TestableParameters:
             intron_names = gene_data.intron_names if intron_specific_lfc and tested_parameter in (
-            TestableParameters.BETA, TestableParameters.GAMMA) else [None]
+                TestableParameters.BETA, TestableParameters.GAMMA) else [None]
             for intron_name in intron_names:
                 lrt_specification = LRTSpecification(num_features_reduced_matrix=reduced_design_matrix.shape[1],
                                                      tested_parameter=tested_parameter,
@@ -278,13 +276,12 @@ def get_results_for_gene(gene_data: GeneData,
                                                                       gene_data=gene_data,
                                                                       dataset_metadata=dataset_metadata,
                                                                       pol_2_total_loss=pol_2_total_loss,
-                                                                      device=device,
-                                                                      reduced_matrix_name=lrt_metadata_row[
-                                                                          'test_name'])
+                                                                      reduced_matrix_name=lrt_metadata_row['test_id'])
 
                 test_result = lrt_metadata_row.to_dict()
                 test_result['tested_parameter'] = lrt_specification.tested_parameter
-                test_result['tested_intron'] = lrt_specification.tested_intron
+                test_result['gene_name'] = gene_data.gene_name
+                test_result['intron_name'] = lrt_specification.tested_intron
 
                 test_result['training_diverged_reduced_model'] = training_results_reduced.training_diverged
                 test_result[
@@ -303,8 +300,8 @@ def get_results_for_gene(gene_data: GeneData,
                 test_result['loss_reduced_model'] = training_results_reduced.final_loss
                 test_result['chi_2_test_statistics'] = 2 * (
                         training_results_reduced.final_loss - training_results_full.final_loss)
-                test_result['p_value_lrt'] = 1 - stats.chi2.cdf(test_result['chi_2_test_statistics'],
-                                                                df=test_result['lrt_df'])
+                test_result['p_value'] = 1 - stats.chi2.cdf(test_result['chi_2_test_statistics'],
+                                                            df=test_result['lrt_df'])
 
                 test_results_list.append(test_result)
 

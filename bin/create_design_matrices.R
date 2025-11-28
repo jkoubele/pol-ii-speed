@@ -9,8 +9,8 @@ parser$add_argument("--samplesheet", required = TRUE,
                     help = "CSV with sample annotation. Must include a 'sample' column.")
 parser$add_argument("--formula", required = TRUE,
                     help = "Design formula using standard R syntax (e.g. '~ age + genotype').")
-parser$add_argument("--lrt_tests", default = NULL,
-                    help = "Optional JSON file with LRT tests parsed from YAML.")
+parser$add_argument("--lrt_contrasts_json", required = TRUE,
+                    help = "JSON file with LRT contrasts.")
 parser$add_argument("--output_folder", default = ".",
                     help = "Where to write design matrices and metadata.")
 
@@ -27,10 +27,7 @@ if (!"sample" %in% names(samplesheet)) {
   stop("samplesheet must contain a column named 'sample'.")
 }
 
-lrt_tests <- list()
-if (!is.null(args$lrt_tests)) {
-  lrt_tests <- fromJSON(args$lrt_tests, simplifyVector = FALSE)
-}
+lrt_contrasts <- fromJSON(args$lrt_contrasts_json, simplifyVector = FALSE)
 
 design_formula <- as.formula(args$formula)
 terms_full <- terms(design_formula)
@@ -47,7 +44,7 @@ design_matrix_df <- design_matrix |>
 write_csv(design_matrix_df, file.path(output_folder, "design_matrix.csv"))
 
 lrt_metadata <- tibble(
-  test_name = character(),
+  test_id = character(),
   variable = character(),
   test_type = character(),  # "continuous" or "categorical"
   group_1 = character(),
@@ -57,14 +54,12 @@ lrt_metadata <- tibble(
   lfc_column_negative = character()   # optional
 )
 
-if (length(lrt_tests) == 0) {
-  write_csv(lrt_metadata, file.path(output_folder, "lrt_metadata.csv"))
+if (length(lrt_contrasts) == 0) {
   warning("No LRT specification provided, creating only design matrix to estimate effect sizes.")
-  quit(status = 0)
 }
 
-for (i in seq_along(lrt_tests)) {
-  test_dict <- lrt_tests[[i]]
+for (i in seq_along(lrt_contrasts)) {
+  test_dict <- lrt_contrasts[[i]]
   variable_name <- as.character(test_dict$variable)
   group_1 <- if ("group_1" %in% names(test_dict)) as.character(test_dict$group_1) else NULL
   group_2 <- if ("group_2" %in% names(test_dict)) as.character(test_dict$group_2) else NULL
@@ -73,10 +68,10 @@ for (i in seq_along(lrt_tests)) {
     stop(sprintf("Variable '%s' not found in samplesheet columns.", variable_name))
   }
 
-  test_name <- paste0("lrt_", i)
+  test_id <- paste0("lrt_", i)
   reduced_matrix_output_path <- file.path(
     output_folder_reduced_matrices,
-    paste0(test_name, ".csv")
+    paste0(test_id, ".csv")
   )
 
   lfc_column_positive <- ""
@@ -196,7 +191,7 @@ for (i in seq_along(lrt_tests)) {
 
   lrt_metadata <- add_row(
     lrt_metadata,
-    test_name = test_name,
+    test_id = test_id,
     variable = variable_name,
     test_type = test_type,
     group_1 = group_1,
@@ -208,4 +203,4 @@ for (i in seq_along(lrt_tests)) {
 
 }
 
-write_csv(lrt_metadata, file.path(output_folder, "lrt_tests_metadata.csv"))
+write_csv(lrt_metadata, file.path(output_folder, "lrt_metadata.csv"))

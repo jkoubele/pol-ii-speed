@@ -39,12 +39,12 @@ def load_dataset_metadata(design_matrix_file: Path,
 
     lrt_metadata = pd.read_csv(lrt_metadata_file)
     reduced_matrices: dict[str, torch.Tensor] = {}
-    for test_name in lrt_metadata['test_name']:
-        reduced_matrix_df = pd.read_csv(reduced_matrices_folder / f"{test_name}.csv").set_index('sample')
+    for test_id in lrt_metadata['test_id']:
+        reduced_matrix_df = pd.read_csv(reduced_matrices_folder / f"{test_id}.csv").set_index('sample')
         if not all(design_matrix_df.index == reduced_matrix_df.index):
             raise ValueError(
                 f"Reduced matrix index {reduced_matrix_df.index} does not equal to design matrix index {design_matrix_df.index}.")
-        reduced_matrices[test_name] = torch.tensor(reduced_matrix_df.values, dtype=torch.float32)
+        reduced_matrices[test_id] = torch.tensor(reduced_matrix_df.values, dtype=torch.float32)
 
     dataset_metadata = DatasetMetadata(design_matrix=torch.tensor(design_matrix_df.values, dtype=torch.float32),
                                        library_sizes=library_sizes,

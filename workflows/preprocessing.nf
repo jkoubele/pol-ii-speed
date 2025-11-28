@@ -1,3 +1,5 @@
+def preprocessing_output_subfolder = "preprocessing"
+
 process FastQC {
     input:
     tuple val(sample), path(read1), path(read2)
@@ -8,8 +10,7 @@ process FastQC {
     path("*.zip"), emit: fastqc_reports
     path("*.html")
 
-    publishDir "${params.outdir}/fastqc", mode: 'copy'
-
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/FastQC", mode: 'copy'
 
     script:
     """
@@ -25,7 +26,7 @@ process MultiQC {
     path("multiqc_report.html")
     path("multiqc_report_data")
 
-    publishDir "${params.outdir}/multiqc", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/MultiQC", mode: 'copy'
 
     script:
     """
@@ -41,7 +42,7 @@ process ExtractIntronsFromGTF {
     output:
     path("introns.bed"), emit: introns_bed_file
 
-    publishDir "${params.outdir}/extracted_introns", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/extracted_introns", mode: 'copy'
 
 
     script:
@@ -60,7 +61,7 @@ process GetGeneIDsFromGTF {
         path("protein_coding_genes.csv"), emit: protein_coding_gene_names
         path("all_genes.csv")
 
-    publishDir "${params.outdir}/gene_names", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/gene_names", mode: 'copy'
 
     script:
     """
@@ -77,7 +78,7 @@ process BuildStarIndex {
     output:
     path("star_index"), emit: star_index_dir
 
-    publishDir "${params.outdir}/STAR_index", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/STAR_index", mode: 'copy'
 
     script:
     """
@@ -102,10 +103,10 @@ process BuildSalmonIndex {
 
     output:
     path("salmon_index"), emit: salmon_index_dir
-    path ("decoy_transcriptome/gentrome.fa", optional: true)
+    path("decoy_transcriptome/gentrome.fa", optional: true)
     path("decoy_transcriptome/decoys.txt", optional: true)
 
-    publishDir "${params.outdir}/salmon_index", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/Salmon_index", mode: 'copy'
 
     script:
     def gencode_flag = gtf_source == 'gencode' ? '--gencode' : ''
@@ -145,7 +146,7 @@ process PrepareTx2Gene {
     output:
     path("tx2gene.tsv"), emit: tx2gene_file
 
-    publishDir "${params.outdir}/tx2gene", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/tx2gene", mode: 'copy'
 
     script:
     """
@@ -160,7 +161,7 @@ process CreateGenomeFastaIndex {
     output:
     path("*.fai"), emit: genome_fai_file
 
-    publishDir "${params.outdir}/genome_fai", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/genome_fai", mode: 'copy'
 
     script:
     """
@@ -176,7 +177,7 @@ process STARAlign {
         tuple val(sample), path("${sample}.Aligned.sortedByCoord.out.bam"), emit: star_bam
         path("${sample}.*")
 
-    publishDir "${params.outdir}/star/${sample}", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/STAR/${sample}", mode: 'copy'
 
     tag "$sample"
 
@@ -205,7 +206,7 @@ process ExtractIntronicReads {
         tuple val(sample), path("intronic_reads_plus_strand.bed.gz"), path("intronic_reads_minus_strand.bed.gz"),  emit:  intronic_bed_files
         tuple val(sample), path("${sample}.intron_read_counts.tsv"), emit:  intron_read_counts
 
-    publishDir "${params.outdir}/intronic_reads/${sample}", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/intronic_reads/${sample}", mode: 'copy'
 
     tag "$sample"
 
@@ -236,7 +237,7 @@ process RemoveIntronicReadsFromFASTQ {
     output:
         tuple val(sample), path("R1.fastq.gz"), path("R2.fastq.gz"), emit: exonic_fastq
 
-    publishDir "${params.outdir}/FASTQ_without_intronic_reads/${sample}", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/FASTQ_without_intronic_reads/${sample}", mode: 'copy'
 
     tag "$sample"
 
@@ -264,7 +265,7 @@ process SalmonQuantification {
         tuple val(sample), path("${sample}.quant.sf"), emit: salmon_quant
         path("**")
 
-    publishDir "${params.outdir}/salmon_quantification/${sample}", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/Salmon_quantification/${sample}", mode: 'copy'
 
     tag "$sample"
 
@@ -288,7 +289,7 @@ process ComputeCoverage {
     output:
         tuple val(sample), path("coverage_plus.bedGraph.gz"), path("coverage_minus.bedGraph.gz"), emit: bed_graph_files
 
-    publishDir "${params.outdir}/bed_graph_intron_coverage/${sample}", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/bed_graph_intron_coverage/${sample}", mode: 'copy'
 
     tag "$sample"
 
@@ -320,7 +321,7 @@ process RescaleCoverage {
     output:
     path("${sample}.parquet"), emit: coverage_parquet_file
 
-    publishDir "${params.outdir}/rescaled_coverage", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/rescaled_coverage", mode: 'copy'
 
     tag "$sample"
 
@@ -344,7 +345,7 @@ process AggregateReadCounts {
         path("library_size_factors.tsv"), emit: library_size_factors
         path("isoform_length_factors.tsv"), emit: isoform_length_factors
 
-    publishDir "${params.outdir}/aggregated_counts", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts", mode: 'copy'
 
     script:
     """

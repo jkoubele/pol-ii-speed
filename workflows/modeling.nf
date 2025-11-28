@@ -1,22 +1,55 @@
-def model_run_id = "model_run_" + new Date().format("yyyy_dd_MM_HH_mm_ss") // Used as name of model results directory
+def modeling_output_subfolder = "modeling"
+// def model_run_id = "model_run_" + new Date().format("dd_MMM_yyyy_HH_mm_ss")
+def model_run_id = 'test'
 
-process CreateDesignMatrix {
+process WriteDesignMetadata {
+    input:
+    val design_formula
+    val intron_specific_lfc
+    val lrt_contrasts    // always a List (possibly empty, you normalized in main.nf)
+
+    output:
+    path "design.json"
+    path "lrt_contrasts.json", emit: lrt_contrasts_json
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/design_metadata", mode: 'copy'
+
+    script:
+    def design_obj = [
+        design_formula      : design_formula,
+        intron_specific_lfc : intron_specific_lfc
+    ]
+
+    def design_json_str       = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(design_obj))
+    def lrt_contrasts_json_str = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(lrt_contrasts ?: []))
+
+    """
+    printf '%s\n' '${design_json_str}'        > design.json
+    printf '%s\n' '${lrt_contrasts_json_str}' > lrt_contrasts.json
+    """
+}
+
+
+
+process CreateDesignMatrices {
     input:
     path samplesheet
     val design_formula
-    path factor_references
+    path lrt_contrasts_json
 
     output:
     path("design_matrix.csv"), emit: design_matrix
+    path("lrt_metadata.csv"), emit: lrt_metadata
+    path("reduced_design_matrices"), emit: reduced_design_matrices
 
-    publishDir "${params.outdir}/design_matrix", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/design_matrices", mode: 'copy'
 
     script:
     """
-    generate_design_matrix.R \
+    create_design_matrices.R \
     --samplesheet $samplesheet \
     --formula "$design_formula" \
-     ${factor_references ? "--factor_references $factor_references" : ""}
+    --lrt_contrasts_json $lrt_contrasts_json
     """
 }
 
@@ -27,7 +60,7 @@ process SplitGeneNames {
     output:
     path("gene_names_chunk_*.csv"), emit: gene_names_chunks
 
-    publishDir "${params.outdir}/gene_names_chunks", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/gene_names_chunks", mode: 'copy'
 
     script:
     """
@@ -45,6 +78,8 @@ process RunModel {
         path(gene_names),
         val(chunk_name),
         path(design_matrix),
+        path(lrt_metadata),
+        path(reduced_matrices_folder),
         path(exon_counts_matrix),
         path(intron_counts_matrix),
         path(library_size_factors),
@@ -54,11 +89,12 @@ process RunModel {
     )
 
     output:
-    path("model_results*.csv"), optional: true, emit: model_result_chunks
+    path("model_parameters*.csv"), optional: true, emit: model_parameters_chunk
+    path("test_results*.csv"), optional: true, emit: test_results_chunk
     path("logs/ignored_genes*.csv"),   emit: ignored_genes_logs
     path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
 
-    publishDir "${params.outdir}/chunk_model_results/${chunk_name}", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/chunk_model_results/${chunk_name}", mode: 'copy'
 
     script:
     """
@@ -71,6 +107,8 @@ process RunModel {
     --library_size_factors $library_size_factors \
     --isoform_length_factors $isoform_length_factors \
     --coverage_data_folder . \
+    --lrt_metadata ${lrt_metadata} \
+    --reduced_matrices_folder ${reduced_matrices_folder} \
     --intron_specific_lfc ${intron_specific_lfc} \
     --output_folder . \
     --output_name_suffix _${chunk_name}
@@ -89,23 +127,16 @@ process MergeModelResultChunks {
     output:
     path("model_results.csv"), emit: model_results
     path("model_results_raw.csv")
-    path ("model_parameters.txt")
     path("ignored_genes.csv")
     path("ignored_introns.csv")
 
-    publishDir "${params.outdir}/model_results/${model_run_id}", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/model_results/${model_run_id}", mode: 'copy'
 
     script:
     """
     merge_and_clean_result_chunks.R \
     --input_folder . \
     --output_folder .
-
-# Intentionally missing indent, so EOF works properly
-cat > model_parameters.txt <<EOF
-design_formula: "${design_formula}"
-intron_specific_lfc: ${intron_specific_lfc}
-EOF
     """
 
 }
@@ -117,7 +148,7 @@ process CreateVolcanoPlots {
     output:
     path("volcano_plots/*")
 
-    publishDir "${params.outdir}/model_results/${model_run_id}", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/model_results/${model_run_id}", mode: 'copy'
 
     script:
     """
@@ -137,25 +168,34 @@ workflow modeling_workflow {
         isoform_length_factors_input
         coverage_files_input
         design_formula
-        factor_reference_levels
+        lrt_contrasts
         intron_specific_lfc
 
 
     main:
-        def samplesheet_channel = Channel.value(file(samplesheet_input))
-        def factor_reference_channel = factor_reference_levels ? Channel.value(file(factor_reference_levels)) : Channel.value([])
+        def samplesheet = Channel.value(file(samplesheet_input))
 
+        def design_metadata = WriteDesignMetadata(
+            design_formula,
+            intron_specific_lfc,
+            lrt_contrasts
+        )
 
-        def design_matrix_channel = CreateDesignMatrix(samplesheet_channel,
-                                                       design_formula,
-                                                       factor_reference_channel)
+        def design_matrices_data = CreateDesignMatrices(
+            samplesheet,
+            design_formula,
+            design_metadata.lrt_contrasts_json
+        )
 
         gene_names_split = SplitGeneNames(gene_names_file_input)
+
 
         def model_input = gene_names_split.gene_names_chunks
             .flatten()
             .map{ file -> tuple(file, file.baseName)}
-            .combine(design_matrix_channel.design_matrix)
+            .combine(design_matrices_data.design_matrix)
+            .combine(design_matrices_data.lrt_metadata)
+            .combine(design_matrices_data.reduced_design_matrices)
             .combine(exon_counts_input)
             .combine(intron_counts_input)
             .combine(library_size_factors_input)
@@ -166,19 +206,19 @@ workflow modeling_workflow {
             .combine(Channel.value(intron_specific_lfc))
 
         def run_model_out = RunModel(model_input)
-
-        def collected_results_chunks       = run_model_out.model_result_chunks.filter { it != null }.collect()
-        def collected_ignored_genes_logs   = run_model_out.ignored_genes_logs.collect()
-        def collected_ignored_introns_logs = run_model_out.ignored_introns_logs.collect()
-
-        def model_result_merged = MergeModelResultChunks(
-            collected_results_chunks,
-            collected_ignored_genes_logs,
-            collected_ignored_introns_logs,
-            design_formula,
-            intron_specific_lfc
-        )
-
-        CreateVolcanoPlots(model_result_merged.model_results)
+//
+//         def collected_results_chunks       = run_model_out.model_result_chunks.filter { it != null }.collect()
+//         def collected_ignored_genes_logs   = run_model_out.ignored_genes_logs.collect()
+//         def collected_ignored_introns_logs = run_model_out.ignored_introns_logs.collect()
+//
+//         def model_result_merged = MergeModelResultChunks(
+//             collected_results_chunks,
+//             collected_ignored_genes_logs,
+//             collected_ignored_introns_logs,
+//             design_formula,
+//             intron_specific_lfc
+//         )
+//
+//         CreateVolcanoPlots(model_result_merged.model_results)
 
 }
