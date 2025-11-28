@@ -298,9 +298,9 @@ def get_results_for_gene(gene_data: GeneData,
                 test_result['lfc'] = lfc_value_positive - lfc_value_negative
                 test_result['loss_full_model'] = training_results_full.final_loss
                 test_result['loss_reduced_model'] = training_results_reduced.final_loss
-                test_result['chi_2_test_statistics'] = 2 * (
+                test_result['chi2_test_statistics'] = 2 * (
                         training_results_reduced.final_loss - training_results_full.final_loss)
-                test_result['p_value'] = 1 - stats.chi2.cdf(test_result['chi_2_test_statistics'],
+                test_result['p_value'] = 1 - stats.chi2.cdf(test_result['chi2_test_statistics'],
                                                             df=test_result['lrt_df'])
 
                 test_results_list.append(test_result)

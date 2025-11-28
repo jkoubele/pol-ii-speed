@@ -1,6 +1,6 @@
 def modeling_output_subfolder = "modeling"
-// def model_run_id = "model_run_" + new Date().format("dd_MMM_yyyy_HH_mm_ss")
-def model_run_id = 'test'
+def model_run_id = "model_run_" + new Date().format("dd_MMM_yyyy_HH_mm_ss")
+
 
 process WriteDesignMetadata {
     input:
@@ -60,7 +60,7 @@ process SplitGeneNames {
     output:
     path("gene_names_chunk_*.csv"), emit: gene_names_chunks
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/gene_names_chunks", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/gene_names_chunks", mode: 'copy'
 
     script:
     """
@@ -72,7 +72,7 @@ process SplitGeneNames {
 }
 
 
-process RunModel {
+process FitModel {
     input:
     tuple (
         path(gene_names),
@@ -94,7 +94,7 @@ process RunModel {
     path("logs/ignored_genes*.csv"),   emit: ignored_genes_logs
     path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/chunk_model_results/${chunk_name}", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
 
     script:
     """
@@ -116,21 +116,26 @@ process RunModel {
 
 }
 
+// collected_model_parameters_chunks,
+//             collected_test_results_chunks
+//             collected_ignored_genes_logs,
+//             collected_ignored_introns_logs
+
 process MergeModelResultChunks {
     input:
-    path model_result_chunks
+    path model_parameters_chunks
+    path test_results_chunks
     path ignored_genes_logs
     path ignored_introns_logs
-    val design_formula
-    val intron_specific_lfc
 
     output:
-    path("model_results.csv"), emit: model_results
-    path("model_results_raw.csv")
+    path("test_results.csv"), emit: test_results
+    path("test_results_raw.csv")
+    path("model_parameters.csv")
     path("ignored_genes.csv")
     path("ignored_introns.csv")
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/model_results/${model_run_id}", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results", mode: 'copy'
 
     script:
     """
@@ -205,20 +210,20 @@ workflow modeling_workflow {
             // Raw intron_specific_lfc is bool and cannot be used in combine()
             .combine(Channel.value(intron_specific_lfc))
 
-        def run_model_out = RunModel(model_input)
-//
-//         def collected_results_chunks       = run_model_out.model_result_chunks.filter { it != null }.collect()
-//         def collected_ignored_genes_logs   = run_model_out.ignored_genes_logs.collect()
-//         def collected_ignored_introns_logs = run_model_out.ignored_introns_logs.collect()
-//
-//         def model_result_merged = MergeModelResultChunks(
-//             collected_results_chunks,
-//             collected_ignored_genes_logs,
-//             collected_ignored_introns_logs,
-//             design_formula,
-//             intron_specific_lfc
-//         )
-//
+        def run_model_out = FitModel(model_input)
+
+        def collected_model_parameters_chunks  = run_model_out.model_parameters_chunk.filter { it != null }.collect()
+        def collected_test_results_chunks  = run_model_out.test_results_chunk.filter { it != null }.collect()
+        def collected_ignored_genes_logs   = run_model_out.ignored_genes_logs.collect()
+        def collected_ignored_introns_logs = run_model_out.ignored_introns_logs.collect()
+
+        def model_result_merged = MergeModelResultChunks(
+            collected_model_parameters_chunks,
+            collected_test_results_chunks,
+            collected_ignored_genes_logs,
+            collected_ignored_introns_logs
+        )
+
 //         CreateVolcanoPlots(model_result_merged.model_results)
 
 }
