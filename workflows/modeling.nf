@@ -99,7 +99,7 @@ process FitModel {
     script:
     """
     export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
-    run_model.py \
+    fit_model.py \
     --design_matrix $design_matrix \
     --gene_names $gene_names \
     --exon_counts $exon_counts_matrix \
