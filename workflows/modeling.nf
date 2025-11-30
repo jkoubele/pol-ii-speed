@@ -116,11 +116,6 @@ process FitModel {
 
 }
 
-// collected_model_parameters_chunks,
-//             collected_test_results_chunks
-//             collected_ignored_genes_logs,
-//             collected_ignored_introns_logs
-
 process MergeModelResultChunks {
     input:
     path model_parameters_chunks
@@ -148,18 +143,17 @@ process MergeModelResultChunks {
 
 process CreateVolcanoPlots {
     input:
-    path model_results
+    path test_results
 
     output:
-    path("volcano_plots/*")
+    path("**")
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/model_results/${model_run_id}", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/volcano_plots", mode: 'copy'
 
     script:
     """
     create_volcano_plots.R \
-    --model_results $model_results \
-    --output_folder ./volcano_plots \
+    --test_results $test_results
     """
 }
 
@@ -224,6 +218,6 @@ workflow modeling_workflow {
             collected_ignored_introns_logs
         )
 
-//         CreateVolcanoPlots(model_result_merged.model_results)
+        CreateVolcanoPlots(model_result_merged.test_results)
 
 }
