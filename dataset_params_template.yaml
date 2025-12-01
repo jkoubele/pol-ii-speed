@@ -16,7 +16,15 @@ salmon_index_with_decoy: false  # If true, use decoy-aware Salmon indexing.
 # Can require lots of memory for larger genomes, we didn't manage to execute it for human genome even with 200GB RAM.
 
 design_formula: "~your+design+formula" # Design formula, specified as formulas in R.
-factor_reference_levels: null # Optional path to CSV file specifying factor baselines.
-intron_specific_lfc: false # Whether Pol II speed and splicing speed LFC should be intron-specific (true) or gene-specific (false).
+intron_specific_lfc: false # Whether elongation speed and splicing speed LFC should be intron-specific (true) or gene-specific (false).
+
+lrt_contrasts: # List of contrasts for likelihood ratio tests.
+  - variable: "your_categorical_variable_to_test" # For categorical variables, please specify groups (levels) that you want to compare
+    group_1: "your_intervention_group"
+    group_2: "your_control_group"
+
+  - variable: "your_continuous_variable_to_test"
 
 stage: 'all' # One of ['preprocess', 'model', 'all'].
+
+

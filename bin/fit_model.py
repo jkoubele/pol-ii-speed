@@ -24,11 +24,11 @@ if __name__ == "__main__":
     parser.add_argument('--design_matrix',
                         type=Path,
                         required=True,
-                        help='Path to the input .csv file with design matrix.')
+                        help='Path to the input CSV file with design matrix.')
     parser.add_argument('--gene_names',
                         type=Path,
                         required=True,
-                        help='Path to the input .csv file with gene names.')
+                        help='Path to the input CSV file with gene names.')
     parser.add_argument('--exon_counts',
                         type=Path,
                         required=True,
@@ -49,6 +49,14 @@ if __name__ == "__main__":
                         type=Path,
                         required=True,
                         help='Path to the folder with .parquet files with intron coverage.')
+    parser.add_argument('--lrt_metadata',
+                        type=Path,
+                        required=True,
+                        help='Path to the .csv file with LRT metadata.')
+    parser.add_argument('--reduced_matrices_folder',
+                        type=Path,
+                        required=True,
+                        help='Folder with CSV files with reduced matrices for LRT.')
     parser.add_argument('--intron_specific_lfc',
                         type=parse_bool_in_argparse,
                         required=True,
@@ -63,26 +71,40 @@ if __name__ == "__main__":
                         help='Suffix for the output CSV files.')
     # For development
     # import sys
+    #
     # sys.argv = [
-    #         'script_name.py',
-    #         '--design_matrix', '/home/jakub/Desktop/data/test_input/design_matrix.csv',
-    #         '--gene_names', '/home/jakub/Desktop/data/test_input/test_genes.csv',
-    #         '--exon_counts', '/home/jakub/Desktop/data/test_input/exon_counts.tsv',
-    #         '--intron_counts', '/home/jakub/Desktop/data/test_input/intron_counts.tsv',
-    #         '--library_size_factors', '/home/jakub/Desktop/data/test_input/library_size_factors.tsv',
-    #         '--isoform_length_factors', '/home/jakub/Desktop/data/test_input/isoform_length_factors.tsv',
-    #         '--coverage_data_folder', '/home/jakub/Desktop/data/test_input/rescaled_coverage/',
-    #         '--intron_specific_lfc', 'false',
-    #         '--output_folder', '/home/jakub/Desktop/data/model_results',
-    #         '--output_basename', 'test'
-    #     ]
+    #     'script_name.py',
+    #     '--design_matrix',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices//design_matrix.csv',
+    #     '--gene_names',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/gene_names/test_genes.csv',
+    #     '--exon_counts',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/exon_counts.tsv',
+    #     '--intron_counts',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/intron_counts.tsv',
+    #     '--library_size_factors',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/library_size_factors.tsv',
+    #     '--isoform_length_factors',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/isoform_length_factors.tsv',
+    #     '--coverage_data_folder',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/rescaled_coverage',
+    #     '--reduced_matrices_folder',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/reduced_design_matrices',
+    #     '--lrt_metadata',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/lrt_tests_metadata.csv',
+    #     '--intron_specific_lfc', 'false',
+    #     '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/model_results',
+    #     '--output_name_suffix', '_dev'
+    # ]
 
     args = parser.parse_args()
 
     output_folder = args.output_folder
     output_folder.mkdir(exist_ok=True, parents=True)
     dataset_metadata = load_dataset_metadata(design_matrix_file=args.design_matrix,
-                                             library_size_factors_file=args.library_size_factors)
+                                             library_size_factors_file=args.library_size_factors,
+                                             lrt_metadata_file=args.lrt_metadata,
+                                             reduced_matrices_folder=args.reduced_matrices_folder)
 
     gene_data_list = load_gene_data_list(gene_names_file=args.gene_names,
                                          exon_counts_file=args.exon_counts,
@@ -93,11 +115,13 @@ if __name__ == "__main__":
                                          log_output_folder=Path("./logs"),
                                          log_output_name_suffix=args.output_name_suffix)
 
-    result_list = [get_results_for_gene(gene_data=gene_data,
-                                        dataset_metadata=dataset_metadata,
-                                        perform_lrt=True,
-                                        intron_specific_lfc=args.intron_specific_lfc)
-                   for gene_data in tqdm(gene_data_list)]
-    if result_list:
-        df_out = pd.concat(result_list).reset_index(drop=True)
-        df_out.to_csv(output_folder / f"model_results{args.output_name_suffix}.csv", index=False)
+    if gene_data_list:  # gene_data_list may be empty if all genes are filtered out in the load_gene_data_list()
+        result_list = [get_results_for_gene(gene_data=gene_data,
+                                            dataset_metadata=dataset_metadata,
+                                            intron_specific_lfc=args.intron_specific_lfc)
+                       for gene_data in tqdm(gene_data_list)]
+        all_model_param_df = pd.concat([result[0] for result in result_list]).reset_index(drop=True)
+        all_test_results_df = pd.concat([result[1] for result in result_list]).reset_index(drop=True)
+
+        all_model_param_df.to_csv(output_folder / f"model_parameters{args.output_name_suffix}.csv", index=False)
+        all_test_results_df.to_csv(output_folder / f"test_results{args.output_name_suffix}.csv", index=False)

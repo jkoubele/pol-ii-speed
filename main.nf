@@ -42,14 +42,15 @@ workflow {
         def coverage_files
 
         if (params.stage == 'model') {
-            gene_names_file = Channel.value(file("${params.outdir}/gene_names/protein_coding_genes.csv"))
-            exon_counts = Channel.value(file("${params.outdir}/aggregated_counts/exon_counts.tsv"))
-            intron_counts = Channel.value(file("${params.outdir}/aggregated_counts/intron_counts.tsv"))
-            library_size_factors = Channel.value(file("${params.outdir}/aggregated_counts/library_size_factors.tsv"))
-            isoform_length_factors = Channel.value(file("${params.outdir}/aggregated_counts/isoform_length_factors.tsv"))
-            coverage_files = Channel.fromPath("${params.outdir}/rescaled_coverage/*.parquet")
-                .collect()
+            def preprocessing_output_subfolder = "preprocessing"
+            gene_names_file        = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/gene_names/protein_coding_genes.csv"))
+            exon_counts            = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/exon_counts.tsv"))
+            intron_counts          = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/intron_counts.tsv"))
+            library_size_factors   = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/library_size_factors.tsv"))
+            isoform_length_factors = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/isoform_length_factors.tsv"))
+            coverage_files         = Channel.fromPath("${params.outdir}/${preprocessing_output_subfolder}/rescaled_coverage/*.parquet").collect()
         }
+
         if (params.stage == 'all') {
 
             gene_names_file        = preproc_out.gene_names_file
@@ -60,6 +61,9 @@ workflow {
             coverage_files         = preproc_out.coverage_files
         }
 
+
+        def lrt_contrasts = params.lrt_contrasts ?: []
+
         modeling_workflow(
             params.samplesheet,
             gene_names_file,
@@ -69,7 +73,7 @@ workflow {
             isoform_length_factors,
             coverage_files,
             params.design_formula,
-            params.factor_reference_levels,
+            lrt_contrasts,
             params.intron_specific_lfc
         )
     }

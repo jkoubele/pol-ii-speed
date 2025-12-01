@@ -33,7 +33,7 @@ The file ```samplesheet.csv``` needs to contain the following 4 columns:
   (The most common Illumina RNA-seq protocols use ```reverse``` orientations).
 
 Besides these 4 mandatory columns, the samplesheet can contain arbitrary explanatory variables (e.g., genotype,
-intervention etc.), that can
+intervention, etc.), that can
 be used in the dataset parameter file to specify a design formula (see below).
 
 ### Preparing dataset parameters
@@ -62,30 +62,34 @@ and filling it according to the comments. We will now discuss several parameter 
 * **Design formula**: the parameter *design_formula* uses R syntax to generate a design matrix from the formula (
   see [R documentation](https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/formula) for details).
   The explanatory variables used in the formula need to be the columns of the ```samplesheet.csv```.
-* **Factor reference levels**: We are using a likelihood-ratio test to assess the significance of the LFC parameters (
-  p-value comparing to the null hypothesis that the LFC is 0). However, with our current implementation, the categorical
-  variables (factors)
-  are only compared to the base level. This means that for factors with 3 or more levels (categories), some comparisons
-  are not made.
+* **LRT contrasts**: We are using likelihood-ratio tests to assess the significance of LFC parameters. The parameter
+  *lrt_contrasts* specifies a list of tests that are going to be performed.
 
-  By default, the base level is decided by alphabetical order. The parameter *factor_reference_levels* can optionally
-  contain a path to a CSV file,
-  which needs to contain columns *factor_name* and *reference*. The entries in *factor_name* are supposed to be the
-  column names of the
-  factors specified in ```samplesheet.csv```. The corresponding entries in *reference* columns specify the base level.
+  For categorical variables, please specify (for each test) the *variable* (name of the column in the samplesheet), and 
+  comparison groups *group_1* and *group_2* (levels of the variable). The null hypothesis being tested is whether the LFC
+  parameters between *group_1* and *group_2* are equal to 0.
 
-  For example, assume that ```samplesheet.csv``` contains column *genotype*, with possible values assigned to the
-  samples being *wild_type*, *knockout_1* and *knockout_2*.
-  By default, the value *knockout_1* will be chosen as the base (reference) level, since it's alphabetically first. The
-  design matrix will then contain variables *knockout_2* and *wild_type* (the reference level, *knockout_1*, is not
-  present in the design matrix to avoid perfect multicollinearity).
-
-  To use *wild_type* as the reference level instead, create a CSV file like this:
+  For example, assume that the samplesheet contains column *genotype*, with levels *wild_type*, *knockout_1*, and *knockout_2*.
+  To test whether each of the knockout group is different from the wild-type, you can specify:
   ```
-  factor_name,reference
-  genotype,wild_type
+  lrt_contrasts:
+  - variable: 'genotype'
+    group_1: 'knockout_1'
+    group_2: 'wild_type'
+    
+  - variable: 'genotype'
+    group_1: 'knockout_2'
+    group_2: 'wild_type'
   ```
-  Then, specify the path to this CSV as the *factor_reference_levels* parameter.
+  You can include as many tests as you wish, e.g., compare also groups in some other explanatory variable, or include also
+  the comparison between *knockout_1* and *knockout_2* in the *genotype* variable.
+
+  For a continuous variable, specify only the *variable* parameter, without the comparison groups. 
+
+  We currently support testing only the main-effect term labels from an R terms object, not interaction or other
+  higher-order term labels. If you wish to test e.g., an interaction term between two variables, please manually create 
+  the interaction variable as a separate column in the *samplesheet*; then, you can add it to the design formula 
+  and also include it in the tests.
 
 * **Stage**: Our pipeline consists of 2 workflows: [pre-processing](./workflows/preprocessing.nf)
   and [modeling](./workflows/modeling.nf).
@@ -95,11 +99,14 @@ and filling it according to the comments. We will now discuss several parameter 
   design formulas.
 
   The parameter *stage* specifies whether both or only one workflow should be run. Possible values are
-  ```"all"``` (to run both workflows), ```"preprocess"``` and ```"model"```.
+  ```"all"``` (to run both workflows), ```"preprocess"``` and ```"model"```. 
+  
+  Please note that you can also generally use the ```-resume``` argument for the ```nextflow run``` command. Setting ```stage: 'model'```
+  is simply an orthogonal way to re-use preprocessed data, independent of the caching done via  Nextflow work folder.
 
 ### Executing the pipeline
 
-Please install [Nextflow](https://www.nextflow.io/) and [Docker](https://www.docker.com/) on your system.
+Please install [Nextflow](https://www.nextflow.io/) (version >= 25.04) and [Docker](https://www.docker.com/) on your system.
 Then, the pipeline can be run by
 
 ```commandline
@@ -109,17 +116,11 @@ nextflow run main.nf -params-file dataset_params.yaml
 See the Nextflow documentation for [details](https://www.nextflow.io/docs/latest/executor.html) on how to run the
 pipeline on your HPC/cloud system.
 
-**Note on Slurm**: On our HPC system using Slurm, we noticed the following bug: when multiple processes fitting the
-model are executed on the same cluster node,
-their CPU usage somehow collide, resulting in orders of magnitude slower process execution. We suspect that this may be
+**Note on Slurm**: On our HPC system using Slurm, we noticed the following bug: when multiple processes *FitModel* are executed on the same cluster node,
+their CPU usages somehow collide, resulting in orders of magnitude slower process execution. We suspect that this may be
 related to the
-underlying BLAS setting and/or our cluster set up, and we are currently trying to resolve this issue. In case that you
-experience similar behavior, please
-execute at most one *RunModel* process per cluster node.
-
-As a hotfix, we set artificially high memory requirements for the *RunModel* process in
-the [nextflow.config](nextflow.config) file, which prevents more than one such process per node on our cluster.
-You may lower the memory requirement to about 10 GB of RAM if needed.
+underlying BLAS setting and/or our cluster setup, and we are currently trying to resolve this issue. In the case that you
+experience similar behavior, please execute at most one *FitModel* process per cluster node.
 
 ## Contact
 

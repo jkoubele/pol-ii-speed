@@ -1,9 +1,9 @@
-from dataclasses import dataclass
-from typing import Optional
-
 import pandas as pd
 import torch
 import torch.nn as nn
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Optional, NamedTuple
 
 
 def safe_exp(x: torch.Tensor, output_threshold: float = 1e20) -> torch.Tensor:
@@ -40,25 +40,29 @@ class DatasetMetadata:
     log_library_sizes: torch.Tensor
     feature_names: list[str]
     sample_names: list[str]
+    lrt_metadata: pd.DataFrame
+    reduced_matrices: dict[str, torch.Tensor]
     num_coverage_bins: int = 100
 
     def to(self, device):
         self.design_matrix = self.design_matrix.to(device)
         self.library_sizes = self.library_sizes.to(device)
         self.log_library_sizes = self.log_library_sizes.to(device)
+        for name, matrix in self.reduced_matrices.items():
+            self.reduced_matrices[name] = matrix.to(device)
         return self
 
 
-@dataclass
-class ParameterMask:
-    logical_mask: torch.Tensor
-    fixed_value_mask: Optional[torch.Tensor] = None
+class TestableParameters(StrEnum):
+    ALPHA = 'alpha'
+    BETA = 'beta'
+    GAMMA = 'gamma'
 
-    def apply(self, param: torch.Tensor) -> torch.Tensor:
-        param_masked = param * self.logical_mask
-        if self.fixed_value_mask is not None:
-            param_masked = param_masked + self.fixed_value_mask
-        return param_masked
+
+class LRTSpecification(NamedTuple):
+    num_features_reduced_matrix: int
+    tested_parameter: TestableParameters
+    tested_intron: Optional[str] = None
 
 
 class Pol2Model(nn.Module):
@@ -66,7 +70,8 @@ class Pol2Model(nn.Module):
     def __init__(self,
                  feature_names: list[str],
                  intron_names: list[str],
-                 intron_specific_lfc=True
+                 intron_specific_lfc: bool,
+                 lrt_specification: Optional[LRTSpecification] = None
                  ):
         super().__init__()
         self.feature_names = feature_names
@@ -89,9 +94,13 @@ class Pol2Model(nn.Module):
         self.intercept_intron = nn.Parameter(torch.zeros(num_introns))
         self.theta = nn.Parameter(torch.zeros(num_introns))
 
-        self.mask_alpha: Optional[ParameterMask] = None
-        self.mask_beta: Optional[ParameterMask] = None
-        self.mask_gamma: Optional[ParameterMask] = None
+        self.lrt_specification = lrt_specification
+        self.tested_intron_index: Optional[int] = None
+        if self.lrt_specification is not None:
+            self.reduced_lfc = nn.Parameter(torch.zeros(self.lrt_specification.num_features_reduced_matrix))
+            self.tested_intron_index: Optional[
+                int] = None if not intron_specific_lfc or self.lrt_specification.tested_parameter == TestableParameters.ALPHA else self.intron_names.index(
+                self.lrt_specification.tested_intron)
 
     def initialize_intercepts(self, gene_data: GeneData, library_sizes: torch.Tensor) -> None:
         with torch.no_grad():
@@ -101,58 +110,37 @@ class Pol2Model(nn.Module):
             intercept_intron_vector = torch.log(gene_data.intron_reads.mean(dim=0) / library_sizes.mean() / 2)
             self.intercept_intron.data.copy_(intercept_intron_vector)
 
-    def set_parameter_mask(self,
-                           param_name: str,
-                           feature_name: str,
-                           intron_name: Optional[str] = None,
-                           value=0.0) -> None:
-        if param_name == 'alpha':
-            logical_mask = torch.ones_like(self.alpha)
-            feature_index = self.feature_names.index(feature_name)
-            logical_mask[feature_index] = 0.0
-            self.mask_alpha = ParameterMask(logical_mask=logical_mask)
-            if value != 0:
-                self.mask_alpha.fixed_value_mask = torch.zeros_like(self.alpha)
-                self.mask_alpha.fixed_value_mask[feature_index] = value
-        elif param_name in ('beta', 'gamma'):
-            logical_mask = torch.ones_like(self.beta)  # beta and gamma have the same shape
-            feature_index = self.feature_names.index(feature_name)
-            if self.intron_specific_lfc:
-                intron_index = self.intron_names.index(intron_name)
-            else:
-                intron_index = 0
-                if intron_name is not None:
-                    raise ValueError(
-                        f"Intron name {intron_name} specified, but the model uses shared LFC for all introns.")
-
-            logical_mask[feature_index, intron_index] = 0.0
-            fixed_value_mask = None
-            if value != 0:
-                fixed_value_mask = torch.zeros_like(self.beta)
-                fixed_value_mask[feature_index, intron_index] = value
-            parameter_mask = ParameterMask(logical_mask=logical_mask,
-                                           fixed_value_mask=fixed_value_mask)
-            if param_name == 'beta':
-                self.mask_beta = parameter_mask
-            elif param_name == 'gamma':
-                self.mask_gamma = parameter_mask
-
-        else:
-            raise RuntimeError(f"Unexpected parameter name: {param_name}")
-
     def forward(self,
                 design_matrix: torch.Tensor,
                 log_library_sizes: torch.Tensor,
-                isoform_length_offset: torch.Tensor):
-        alpha = self.alpha if self.mask_alpha is None else self.mask_alpha.apply(self.alpha)
-        beta = self.beta if self.mask_beta is None else self.mask_beta.apply(self.beta)
-        gamma = self.gamma if self.mask_gamma is None else self.mask_gamma.apply(self.gamma)
+                isoform_length_offset: torch.Tensor,
+                reduced_design_matrix: Optional[torch.Tensor] = None):
 
-        gene_expression_term = design_matrix @ alpha
+        if self.lrt_specification is None:
+            gene_expression_term = design_matrix @ self.alpha
+            speed_term = design_matrix @ self.beta
+            splicing_term = design_matrix @ self.gamma
+        else:
+            if reduced_design_matrix is None:
+                raise ValueError(
+                    "reduced_design_matrix must be provided in the LRT mode (i.e. when lrt_specification is not None.")
+            gene_expression_term = reduced_design_matrix @ self.reduced_lfc if self.lrt_specification.tested_parameter == TestableParameters.ALPHA else design_matrix @ self.alpha
+
+            if self.intron_specific_lfc:
+                speed_term = design_matrix @ self.beta
+                splicing_term = design_matrix @ self.gamma
+                if self.lrt_specification.tested_parameter == TestableParameters.BETA:
+                    speed_term[:, self.tested_intron_index] = reduced_design_matrix @ self.reduced_lfc
+                elif self.lrt_specification.tested_parameter == TestableParameters.GAMMA:
+                    splicing_term[:, self.tested_intron_index] = reduced_design_matrix @ self.reduced_lfc
+
+            else:
+                speed_term = (reduced_design_matrix @ self.reduced_lfc).unsqueeze(
+                    1) if self.lrt_specification.tested_parameter == TestableParameters.BETA else design_matrix @ self.beta
+                splicing_term = (reduced_design_matrix @ self.reduced_lfc).unsqueeze(
+                    1) if self.lrt_specification.tested_parameter == TestableParameters.GAMMA else design_matrix @ self.gamma
+
         predicted_log_reads_exon = self.intercept_exon + log_library_sizes + isoform_length_offset + gene_expression_term
-
-        speed_term = design_matrix @ beta
-        splicing_term = design_matrix @ gamma
 
         pi = torch.sigmoid(self.theta - speed_term - splicing_term)
 
