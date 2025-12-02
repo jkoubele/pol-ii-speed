@@ -30,7 +30,8 @@ def train_model(model: Pol2Model,
                 reduced_matrix_name: Optional[str] = None,
                 max_epochs=200,
                 max_patience=5,
-                loss_change_tolerance=1e-6) -> tuple[Pol2Model, TrainingResults]:
+                loss_change_tolerance=1e-6,
+                l2_regularization_coefficient: Optional[float] = None) -> tuple[Pol2Model, TrainingResults]:
     reduced_matrix = None if reduced_matrix_name is None else dataset_metadata.reduced_matrices[reduced_matrix_name]
 
     optimizer = optim.LBFGS(model.parameters(),
@@ -53,6 +54,9 @@ def train_model(model: Pol2Model,
                                 predicted_reads_exon=predicted_reads_exon,
                                 predicted_reads_intron=predicted_reads_intron,
                                 pi=pi)
+        if l2_regularization_coefficient is not None:
+            loss += l2_regularization_coefficient * torch.sum(model.beta ** 2)
+            loss += l2_regularization_coefficient * torch.sum(model.gamma ** 2)
         if not torch.isfinite(loss):
             return torch.as_tensor(LOSS_CLAMP_VALUE, dtype=loss.dtype, device=loss.device)
         loss.backward()
@@ -64,12 +68,17 @@ def train_model(model: Pol2Model,
                                                                      log_library_sizes=dataset_metadata.log_library_sizes,
                                                                      isoform_length_offset=gene_data.isoform_length_offset,
                                                                      reduced_design_matrix=reduced_matrix)
-            return pol_2_total_loss(reads_exon=gene_data.exon_reads,
+            loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                     reads_introns=gene_data.intron_reads,
                                     coverage=gene_data.coverage,
                                     predicted_reads_exon=predicted_reads_exon,
                                     predicted_reads_intron=predicted_reads_intron,
                                     pi=pi)
+            if l2_regularization_coefficient is not None:
+                loss += l2_regularization_coefficient * torch.sum(model.beta ** 2)
+                loss += l2_regularization_coefficient * torch.sum(model.gamma ** 2)
+
+            return loss
 
     previous_loss = None
     patience_counter = 0
@@ -304,6 +313,16 @@ def get_results_for_gene(gene_data: GeneData,
                                                             df=test_result['lrt_df'])
 
                 test_results_list.append(test_result)
+
+    model_regularized = Pol2Model(feature_names=dataset_metadata.feature_names,
+                                  intron_names=gene_data.intron_names,
+                                  intron_specific_lfc=intron_specific_lfc).to(device)
+    model_regularized.load_state_dict(model_full.state_dict())
+    model_regularized, training_results_regularized = train_model(model=model_full,
+                                                                  gene_data=gene_data,
+                                                                  dataset_metadata=dataset_metadata,
+                                                                  pol_2_total_loss=pol_2_total_loss,
+                                                                  l2_regularization_coefficient=0.1)
 
     test_results_df = pd.DataFrame(test_results_list)
     return model_param_df, test_results_df
