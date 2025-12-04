@@ -199,7 +199,7 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     # assert hessian_subset.shape[0] == torch.linalg.matrix_rank(hessian_subset)    
 
     cov_matrix = torch.linalg.pinv(hessian_subset).cpu()
-    standard_errors = torch.sqrt(torch.diag(cov_matrix)).numpy()
+    standard_errors = torch.sqrt(torch.clamp(torch.diag(cov_matrix), min=0.0)).numpy()
 
     df_param['SE'] = np.nan
     df_param['z_score'] = np.nan
