@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from scipy import stats
 from torch import optim
 from torch.func import functional_call, hessian
-from typing import Optional
+from typing import Optional, OrderedDict
 
 from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model, TestableParameters, \
     LRTSpecification
 
 LOSS_CLAMP_VALUE = 1e30
+
+StateDict = OrderedDict[str, torch.Tensor]
 
 
 @dataclass
@@ -21,6 +23,13 @@ class TrainingResults:
     num_epochs: int
     losses: list[float]
     training_diverged: bool
+
+
+@dataclass
+class CacheForRegularization:
+    training_input_per_gene: list[tuple[GeneData, StateDict]]
+    dataset_metadata: DatasetMetadata
+    intron_specific_lfc: bool
 
 
 def train_model(model: Pol2Model,
@@ -214,11 +223,11 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     return df_param
 
 
-def get_results_for_gene(gene_data: GeneData,
-                         dataset_metadata: DatasetMetadata,
-                         intron_specific_lfc: bool,
-                         device='cpu'
-                         ) -> tuple[pd.DataFrame, pd.DataFrame]:
+def get_model_results(gene_data: GeneData,
+                      dataset_metadata: DatasetMetadata,
+                      intron_specific_lfc: bool,
+                      device='cpu'
+                      ) -> tuple[pd.DataFrame, pd.DataFrame, StateDict]:
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
     pol_2_total_loss = Pol2TotalLoss().to(device)
@@ -314,15 +323,24 @@ def get_results_for_gene(gene_data: GeneData,
 
                 test_results_list.append(test_result)
 
-    model_regularized = Pol2Model(feature_names=dataset_metadata.feature_names,
-                                  intron_names=gene_data.intron_names,
-                                  intron_specific_lfc=intron_specific_lfc).to(device)
-    model_regularized.load_state_dict(model_full.state_dict())
-    model_regularized, training_results_regularized = train_model(model=model_full,
-                                                                  gene_data=gene_data,
-                                                                  dataset_metadata=dataset_metadata,
-                                                                  pol_2_total_loss=pol_2_total_loss,
-                                                                  l2_regularization_coefficient=0.1)
+    # model_regularized = Pol2Model(feature_names=dataset_metadata.feature_names,
+    #                               intron_names=gene_data.intron_names,
+    #                               intron_specific_lfc=intron_specific_lfc).to(device)
+    # model_regularized.load_state_dict(model_full.state_dict())
+    # model_regularized, training_results_regularized = train_model(model=model_full,
+    #                                                               gene_data=gene_data,
+    #                                                               dataset_metadata=dataset_metadata,
+    #                                                               pol_2_total_loss=pol_2_total_loss,
+    #                                                               l2_regularization_coefficient=0.1)
 
     test_results_df = pd.DataFrame(test_results_list)
-    return model_param_df, test_results_df
+    return model_param_df, test_results_df, model_full.state_dict()
+
+
+def get_regularized_model_results(gene_data: GeneData,
+                                  dataset_metadata: DatasetMetadata,
+                                  hot_start_state_dict: StateDict,
+                                  intron_specific_lfc: bool,
+                                  device='cpu'
+                                  ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    pass

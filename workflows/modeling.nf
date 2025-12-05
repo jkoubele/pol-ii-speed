@@ -1,12 +1,12 @@
 def modeling_output_subfolder = "modeling"
-def model_run_id = "model_run_" + new Date().format("dd_MMM_yyyy_HH_mm_ss")
+def model_run_id = 'test' //"model_run_" + new Date().format("dd_MMM_yyyy_HH_mm_ss")
 
 
 process WriteDesignMetadata {
     input:
     val design_formula
     val intron_specific_lfc
-    val lrt_contrasts    // always a List (possibly empty, you normalized in main.nf)
+    val lrt_contrasts
 
     output:
     path "design.json"
@@ -67,7 +67,7 @@ process SplitGeneNames {
     split_gene_names.R \
     --input_gene_names $gene_names \
     --output_folder . \
-    --chunk_size 100
+    --chunk_size 10
     """
 }
 
@@ -93,6 +93,7 @@ process FitModel {
     path("test_results*.csv"), optional: true, emit: test_results_chunk
     path("logs/ignored_genes*.csv"),   emit: ignored_genes_logs
     path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
+    path("cache_for_regularization*.pt"), optional: true, emit: cache_for_regularization
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
 
@@ -125,8 +126,8 @@ process MergeModelResultChunks {
 
     output:
     path("test_results.csv"), emit: test_results
+    path("model_parameters.csv"), emit: model_parameters
     path("test_results_raw.csv")
-    path("model_parameters.csv")
     path("ignored_genes.csv")
     path("ignored_introns.csv")
 
@@ -155,6 +156,23 @@ process CreateVolcanoPlots {
     create_volcano_plots.R \
     --test_results $test_results
     """
+}
+
+process AdaptiveShrinkage {
+    input:
+    path model_parameters
+
+    output:
+    path("regularization_coefficients.csv")
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/adaptive_shrinkage", mode: 'copy'
+
+    script:
+    """
+    adaptive_shrinkage.R \
+    --model_parameters $model_parameters
+    """
+
 }
 
 workflow modeling_workflow {
@@ -219,5 +237,7 @@ workflow modeling_workflow {
         )
 
         CreateVolcanoPlots(model_result_merged.test_results)
+
+        def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
 
 }

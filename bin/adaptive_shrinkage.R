@@ -1,3 +1,5 @@
+#!/usr/bin/env Rscript
+
 library(tidyverse)
 library(ashr)
 library(argparse)
@@ -10,12 +12,14 @@ parser$add_argument("--model_parameters",
 parser$add_argument("--output_folder", default = ".",
                     help = "Where to write the output CSV with regularization coefficients.")
 
-if (interactive()) {
-  args = list(model_parameters = '/cellfile/projects/pol_ii_speed/jkoubele/analysis/mouse_age_dr/modeling/model_run_02_Dec_2025_18_55_48/model_results/model_parameters.csv',
-              output_folder = '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/test_ashr')
-} else {
-  args <- parser$parse_args()
-}
+# if (interactive()) {
+#   args = list(model_parameters = '/cellfile/projects/pol_ii_speed/jkoubele/analysis/mouse_age_dr/modeling/model_run_02_Dec_2025_18_55_48/model_results/model_parameters.csv',
+#               output_folder = '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/test_ashr')
+# } else {
+#   args <- parser$parse_args()
+# }
+
+args <- parser$parse_args()
 
 model_parameters <- read.csv(args$model_parameters)
 
