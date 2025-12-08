@@ -125,9 +125,8 @@ process MergeModelResultChunks {
     path ignored_introns_logs
 
     output:
-    path("test_results.csv"), emit: test_results
+    path("test_results_before_regularization.csv"), emit: test_results_before_regularization
     path("model_parameters.csv"), emit: model_parameters
-    path("test_results_raw.csv")
     path("ignored_genes.csv")
     path("ignored_introns.csv")
 
@@ -135,7 +134,7 @@ process MergeModelResultChunks {
 
     script:
     """
-    merge_and_clean_result_chunks.R \
+    merge_result_chunks.R \
     --input_folder . \
     --output_folder .
     """
@@ -172,7 +171,6 @@ process AdaptiveShrinkage {
     adaptive_shrinkage.R \
     --model_parameters $model_parameters
     """
-
 }
 
 process FitRegularizedModel {
@@ -196,7 +194,27 @@ process FitRegularizedModel {
     --regularization_coefficients $regularization_coefficients \
     --output_name_suffix _$chunk_name
     """
+}
 
+process AddRegularizationToTestResults {
+    input:
+    path test_results_before_regularization
+    path regularized_model_parameters_chunks
+
+    output:
+    path("test_results.csv"), emit: test_results
+    path("test_results_full.csv")
+    path("regularized_model_parameters.csv")
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results", mode: 'copy'
+
+    script:
+    """
+    add_regularization_to_test_results.R \
+    --regularization_chunks_folder . \
+    --test_results $test_results_before_regularization \
+    --output_folder .
+    """
 
 }
 
@@ -261,14 +279,21 @@ workflow modeling_workflow {
             collected_ignored_introns_logs
         )
 
-        CreateVolcanoPlots(model_result_merged.test_results)
-
         def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
 
         def regularized_model_input = fit_model_output.cache_for_regularization
             .combine(adaptive_shrinkage_out.regularization_coefficients)
 
         def fit_regularized_model_output = FitRegularizedModel(regularized_model_input)
+
+        def collected_regularized_model_parameters_chunk = fit_regularized_model_output.regularized_model_parameters_chunk.collect()
+
+        def add_regularization_output = AddRegularizationToTestResults(
+            model_result_merged.test_results_before_regularization,
+            collected_regularized_model_parameters_chunk
+        )
+
+        //         CreateVolcanoPlots(model_result_merged.test_results)
 
 
 }
