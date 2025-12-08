@@ -40,8 +40,33 @@ write_csv(regularized_model_parameters_merged_df, file.path(output_folder, 'regu
 
 test_results <- read_csv(args$test_results)
 
+lfc_value_positive <- test_results |>
+  left_join(
+    regularized_model_parameters_merged_df,
+    by = c(
+      "tested_parameter"   = "parameter_type",
+      "gene_name"          = "gene_name",
+      "intron_name"        = "intron_name",
+      "lfc_column_positive" = "feature_name"
+    )
+  ) |>
+  mutate(value = replace_na(value, 0.0)) |>
+  pull(value)
+
+lfc_value_negative <- test_results |>
+  left_join(
+    regularized_model_parameters_merged_df,
+    by = c(
+      "tested_parameter"   = "parameter_type",
+      "gene_name"          = "gene_name",
+      "intron_name"        = "intron_name",
+      "lfc_column_negative" = "feature_name"
+    )
+  ) |>
+  mutate(value = replace_na(value, 0.0)) |>
+  pull(value)
+
+test_results$lfc_regularized <- lfc_value_positive - lfc_value_negative
+
 write_csv(test_results, file.path(output_folder, 'test_results.csv'))
 write_csv(test_results, file.path(output_folder, 'test_results_full.csv'))
-
-
-
