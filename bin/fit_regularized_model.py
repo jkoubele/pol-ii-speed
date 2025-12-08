@@ -35,7 +35,7 @@ if __name__ == "__main__":
     regularization_coefficients_df = pd.read_csv(args.regularization_coefficients)
 
     device = 'cpu'
-    cache_for_regularization = torch.load(cache_for_regularization_file,
+    cache_for_regularization = torch.load(args.cache_for_regularization,
                                           weights_only=False,
                                           map_location=device)
     dataset_metadata = cache_for_regularization.dataset_metadata
@@ -44,7 +44,7 @@ if __name__ == "__main__":
                                                                                        dataset_metadata=dataset_metadata,
                                                                                        intron_specific_lfc=intron_specific_lfc,
                                                                                        hot_start_state_dict=model_state_dict,
-                                                                                       regularization_coefficients_df=None,
+                                                                                       regularization_coefficients_df=regularization_coefficients_df,
                                                                                        device=device) for
                                                          gene_data, model_state_dict in
                                                          tqdm(cache_for_regularization.training_input_per_gene)]

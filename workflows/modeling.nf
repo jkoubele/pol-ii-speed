@@ -93,7 +93,7 @@ process FitModel {
     path("test_results*.csv"), optional: true, emit: test_results_chunk
     path("logs/ignored_genes*.csv"),   emit: ignored_genes_logs
     path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
-    path("cache_for_regularization*.pt"), optional: true, emit: cache_for_regularization
+    tuple path("cache_for_regularization*.pt"), val(chunk_name), optional: true, emit: cache_for_regularization
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
 
@@ -163,7 +163,7 @@ process AdaptiveShrinkage {
     path model_parameters
 
     output:
-    path("regularization_coefficients.csv")
+    path("regularization_coefficients.csv"), emit: regularization_coefficients
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/adaptive_shrinkage", mode: 'copy'
 
@@ -172,6 +172,31 @@ process AdaptiveShrinkage {
     adaptive_shrinkage.R \
     --model_parameters $model_parameters
     """
+
+}
+
+process FitRegularizedModel {
+    input:
+    tuple(
+        path(cache_for_regularization),
+        val(chunk_name),
+        path(regularization_coefficients)
+    )
+
+    output:
+    path("regularized_model_parameters*.csv"), emit: regularized_model_parameters_chunk
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/regularized_model_results_chunks/${chunk_name}", mode: 'copy'
+
+    script:
+    """
+    export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
+    fit_regularized_model.py \
+    --cache_for_regularization $cache_for_regularization \
+    --regularization_coefficients $regularization_coefficients \
+    --output_name_suffix _$chunk_name
+    """
+
 
 }
 
@@ -222,12 +247,12 @@ workflow modeling_workflow {
             // Raw intron_specific_lfc is bool and cannot be used in combine()
             .combine(Channel.value(intron_specific_lfc))
 
-        def run_model_out = FitModel(model_input)
+        def fit_model_output = FitModel(model_input)
 
-        def collected_model_parameters_chunks  = run_model_out.model_parameters_chunk.filter { it != null }.collect()
-        def collected_test_results_chunks  = run_model_out.test_results_chunk.filter { it != null }.collect()
-        def collected_ignored_genes_logs   = run_model_out.ignored_genes_logs.collect()
-        def collected_ignored_introns_logs = run_model_out.ignored_introns_logs.collect()
+        def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.filter { it != null }.collect()
+        def collected_test_results_chunks  = fit_model_output.test_results_chunk.filter { it != null }.collect()
+        def collected_ignored_genes_logs   = fit_model_output.ignored_genes_logs.collect()
+        def collected_ignored_introns_logs = fit_model_output.ignored_introns_logs.collect()
 
         def model_result_merged = MergeModelResultChunks(
             collected_model_parameters_chunks,
@@ -239,5 +264,11 @@ workflow modeling_workflow {
         CreateVolcanoPlots(model_result_merged.test_results)
 
         def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
+
+        def regularized_model_input = fit_model_output.cache_for_regularization
+            .combine(adaptive_shrinkage_out.regularization_coefficients)
+
+        def fit_regularized_model_output = FitRegularizedModel(regularized_model_input)
+
 
 }
