@@ -1,5 +1,5 @@
 def modeling_output_subfolder = "modeling"
-def model_run_id = 'test' //"model_run_" + new Date().format("dd_MMM_yyyy_HH_mm_ss")
+def model_run_id = "model_run_" + new Date().format("dd_MMM_yyyy_HH_mm_ss")
 
 
 process WriteDesignMetadata {
@@ -60,14 +60,14 @@ process SplitGeneNames {
     output:
     path("gene_names_chunk_*.csv"), emit: gene_names_chunks
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/gene_names_chunks", mode: 'copy'
+//     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/gene_names_chunks", mode: 'copy'
 
     script:
     """
     split_gene_names.R \
     --input_gene_names $gene_names \
     --output_folder . \
-    --chunk_size 10
+    --chunk_size 100
     """
 }
 
@@ -95,7 +95,7 @@ process FitModel {
     path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
     tuple path("cache_for_regularization*.pt"), val(chunk_name), optional: true, emit: cache_for_regularization
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
+//     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
 
     script:
     """
@@ -130,7 +130,12 @@ process MergeModelResultChunks {
     path("ignored_genes.csv")
     path("ignored_introns.csv")
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results",
+     mode: 'copy',
+     saveAs: { filename ->
+            if( filename == 'test_results_before_regularization.csv' ) null // Not publishing intermediate test results
+            else filename
+        }
 
     script:
     """
@@ -141,21 +146,6 @@ process MergeModelResultChunks {
 
 }
 
-process CreateVolcanoPlots {
-    input:
-    path test_results
-
-    output:
-    path("**")
-
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/volcano_plots", mode: 'copy'
-
-    script:
-    """
-    create_volcano_plots.R \
-    --test_results $test_results
-    """
-}
 
 process AdaptiveShrinkage {
     input:
@@ -184,7 +174,7 @@ process FitRegularizedModel {
     output:
     path("regularized_model_parameters*.csv"), emit: regularized_model_parameters_chunk
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/regularized_model_results_chunks/${chunk_name}", mode: 'copy'
+//     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/regularized_model_results_chunks/${chunk_name}", mode: 'copy'
 
     script:
     """
@@ -203,7 +193,6 @@ process AddRegularizationToTestResults {
 
     output:
     path("test_results.csv"), emit: test_results
-    path("test_results_full.csv")
     path("regularized_model_parameters.csv")
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results", mode: 'copy'
@@ -216,6 +205,22 @@ process AddRegularizationToTestResults {
     --output_folder .
     """
 
+}
+
+process CreateVolcanoPlots {
+    input:
+    path test_results
+
+    output:
+    path("**")
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/volcano_plots", mode: 'copy'
+
+    script:
+    """
+    create_volcano_plots.R \
+    --test_results $test_results
+    """
 }
 
 workflow modeling_workflow {
@@ -293,7 +298,7 @@ workflow modeling_workflow {
             collected_regularized_model_parameters_chunk
         )
 
-        //         CreateVolcanoPlots(model_result_merged.test_results)
+        CreateVolcanoPlots(add_regularization_output.test_results)
 
 
 }
