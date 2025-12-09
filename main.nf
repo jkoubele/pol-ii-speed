@@ -61,6 +61,11 @@ workflow {
             coverage_files         = preproc_out.coverage_files
         }
 
+        if (params.custom_gene_list) {
+            log.info("Using custom gene list instead of default protein-coding genes: ${params.custom_gene_list}")
+            gene_names_file = Channel.value(file(params.custom_gene_list))
+        }
+
 
         def lrt_contrasts = params.lrt_contrasts ?: []
 

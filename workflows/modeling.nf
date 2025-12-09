@@ -6,7 +6,7 @@ process WriteDesignMetadata {
     input:
     val design_formula
     val intron_specific_lfc
-    val lrt_contrasts    // always a List (possibly empty, you normalized in main.nf)
+    val lrt_contrasts
 
     output:
     path "design.json"
@@ -60,7 +60,7 @@ process SplitGeneNames {
     output:
     path("gene_names_chunk_*.csv"), emit: gene_names_chunks
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/gene_names_chunks", mode: 'copy'
+//     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/gene_names_chunks", mode: 'copy'
 
     script:
     """
@@ -93,8 +93,9 @@ process FitModel {
     path("test_results*.csv"), optional: true, emit: test_results_chunk
     path("logs/ignored_genes*.csv"),   emit: ignored_genes_logs
     path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
+    tuple path("cache_for_regularization*.pt"), val(chunk_name), optional: true, emit: cache_for_regularization
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
+//     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
 
     script:
     """
@@ -124,18 +125,83 @@ process MergeModelResultChunks {
     path ignored_introns_logs
 
     output:
-    path("test_results.csv"), emit: test_results
-    path("test_results_raw.csv")
-    path("model_parameters.csv")
+    path("test_results_before_regularization.csv"), emit: test_results_before_regularization
+    path("model_parameters.csv"), emit: model_parameters
     path("ignored_genes.csv")
     path("ignored_introns.csv")
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results",
+     mode: 'copy',
+     saveAs: { filename ->
+            if( filename == 'test_results_before_regularization.csv' ) null // Not publishing intermediate test results
+            else filename
+        }
+
+    script:
+    """
+    merge_result_chunks.R \
+    --input_folder . \
+    --output_folder .
+    """
+
+}
+
+
+process AdaptiveShrinkage {
+    input:
+    path model_parameters
+
+    output:
+    path("regularization_coefficients.csv"), emit: regularization_coefficients
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/adaptive_shrinkage", mode: 'copy'
+
+    script:
+    """
+    adaptive_shrinkage.R \
+    --model_parameters $model_parameters
+    """
+}
+
+process FitRegularizedModel {
+    input:
+    tuple(
+        path(cache_for_regularization),
+        val(chunk_name),
+        path(regularization_coefficients)
+    )
+
+    output:
+    path("regularized_model_parameters*.csv"), emit: regularized_model_parameters_chunk
+
+//     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/regularized_model_results_chunks/${chunk_name}", mode: 'copy'
+
+    script:
+    """
+    export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
+    fit_regularized_model.py \
+    --cache_for_regularization $cache_for_regularization \
+    --regularization_coefficients $regularization_coefficients \
+    --output_name_suffix _$chunk_name
+    """
+}
+
+process AddRegularizationToTestResults {
+    input:
+    path test_results_before_regularization
+    path regularized_model_parameters_chunks
+
+    output:
+    path("test_results.csv"), emit: test_results
+    path("regularized_model_parameters.csv")
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results", mode: 'copy'
 
     script:
     """
-    merge_and_clean_result_chunks.R \
-    --input_folder . \
+    add_regularization_to_test_results.R \
+    --regularization_chunks_folder . \
+    --test_results $test_results_before_regularization \
     --output_folder .
     """
 
@@ -204,12 +270,12 @@ workflow modeling_workflow {
             // Raw intron_specific_lfc is bool and cannot be used in combine()
             .combine(Channel.value(intron_specific_lfc))
 
-        def run_model_out = FitModel(model_input)
+        def fit_model_output = FitModel(model_input)
 
-        def collected_model_parameters_chunks  = run_model_out.model_parameters_chunk.filter { it != null }.collect()
-        def collected_test_results_chunks  = run_model_out.test_results_chunk.filter { it != null }.collect()
-        def collected_ignored_genes_logs   = run_model_out.ignored_genes_logs.collect()
-        def collected_ignored_introns_logs = run_model_out.ignored_introns_logs.collect()
+        def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.filter { it != null }.collect()
+        def collected_test_results_chunks  = fit_model_output.test_results_chunk.filter { it != null }.collect()
+        def collected_ignored_genes_logs   = fit_model_output.ignored_genes_logs.collect()
+        def collected_ignored_introns_logs = fit_model_output.ignored_introns_logs.collect()
 
         def model_result_merged = MergeModelResultChunks(
             collected_model_parameters_chunks,
@@ -218,6 +284,20 @@ workflow modeling_workflow {
             collected_ignored_introns_logs
         )
 
-        CreateVolcanoPlots(model_result_merged.test_results)
+        def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
+
+        def regularized_model_input = fit_model_output.cache_for_regularization
+            .combine(adaptive_shrinkage_out.regularization_coefficients)
+
+        def fit_regularized_model_output = FitRegularizedModel(regularized_model_input)
+
+        def collected_regularized_model_parameters_chunk = fit_regularized_model_output.regularized_model_parameters_chunk.collect()
+
+        def add_regularization_output = AddRegularizationToTestResults(
+            model_result_merged.test_results_before_regularization,
+            collected_regularized_model_parameters_chunk
+        )
+
+        CreateVolcanoPlots(add_regularization_output.test_results)
 
 }

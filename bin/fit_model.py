@@ -2,12 +2,13 @@
 
 import argparse
 from pathlib import Path
+import torch
 
 import pandas as pd
 from tqdm import tqdm
 
 from pol_ii_speed_modeling.load_dataset import load_dataset_metadata, load_gene_data_list
-from pol_ii_speed_modeling.train import get_results_for_gene
+from pol_ii_speed_modeling.train import get_model_results, CacheForRegularization, StateDict
 
 
 def parse_bool_in_argparse(argument: str) -> bool:
@@ -71,29 +72,29 @@ if __name__ == "__main__":
                         help='Suffix for the output CSV files.')
     # For development
     # import sys
-    #
+    # #
     # sys.argv = [
     #     'script_name.py',
     #     '--design_matrix',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices//design_matrix.csv',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/modeling/model_run_01_Dec_2025_01_01_40/design_matrices/design_matrix.csv',
     #     '--gene_names',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/gene_names/test_genes.csv',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/preprocessing/gene_names/test_10.csv',
     #     '--exon_counts',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/exon_counts.tsv',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/preprocessing/aggregated_counts/exon_counts.tsv',
     #     '--intron_counts',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/intron_counts.tsv',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/preprocessing/aggregated_counts/intron_counts.tsv',
     #     '--library_size_factors',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/library_size_factors.tsv',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/preprocessing/aggregated_counts/library_size_factors.tsv',
     #     '--isoform_length_factors',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/aggregated_counts/isoform_length_factors.tsv',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/preprocessing/aggregated_counts/isoform_length_factors.tsv',
     #     '--coverage_data_folder',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/rescaled_coverage',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/preprocessing/rescaled_coverage',
     #     '--reduced_matrices_folder',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/reduced_design_matrices',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/modeling/model_run_01_Dec_2025_01_01_40/design_matrices/reduced_design_matrices',
     #     '--lrt_metadata',
-    #     '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/design_matrices/lrt_tests_metadata.csv',
+    #     '/cellfile/projects/pol_ii_speed/jkoubele/analysis/EU_seq_Joris/results/modeling/model_run_01_Dec_2025_01_01_40/design_matrices/lrt_metadata.csv',
     #     '--intron_specific_lfc', 'false',
-    #     '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/design_matrix_test/model_results',
+    #     '--output_folder', '/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/test_regularization',
     #     '--output_name_suffix', '_dev'
     # ]
 
@@ -116,12 +117,25 @@ if __name__ == "__main__":
                                          log_output_name_suffix=args.output_name_suffix)
 
     if gene_data_list:  # gene_data_list may be empty if all genes are filtered out in the load_gene_data_list()
-        result_list = [get_results_for_gene(gene_data=gene_data,
-                                            dataset_metadata=dataset_metadata,
-                                            intron_specific_lfc=args.intron_specific_lfc)
+        result_list = [get_model_results(gene_data=gene_data,
+                                         dataset_metadata=dataset_metadata,
+                                         intron_specific_lfc=args.intron_specific_lfc)
                        for gene_data in tqdm(gene_data_list)]
+
+        model_params_list: list[pd.DataFrame] = [result[0] for result in result_list]
+        test_results_list: list[pd.DataFrame] = [result[1] for result in result_list]
+        state_dicts_list: list[StateDict] = [result[2] for result in result_list]
+
         all_model_param_df = pd.concat([result[0] for result in result_list]).reset_index(drop=True)
         all_test_results_df = pd.concat([result[1] for result in result_list]).reset_index(drop=True)
 
         all_model_param_df.to_csv(output_folder / f"model_parameters{args.output_name_suffix}.csv", index=False)
         all_test_results_df.to_csv(output_folder / f"test_results{args.output_name_suffix}.csv", index=False)
+
+        cache_for_regularization = CacheForRegularization(
+            training_input_per_gene=list(zip(gene_data_list, state_dicts_list)),
+            dataset_metadata=dataset_metadata,
+            intron_specific_lfc=args.intron_specific_lfc
+        )
+        torch.save(cache_for_regularization,
+                   f"cache_for_regularization{args.output_name_suffix}.pt")

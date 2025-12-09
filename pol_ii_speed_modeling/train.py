@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from scipy import stats
 from torch import optim
 from torch.func import functional_call, hessian
-from typing import Optional
+from typing import Optional, OrderedDict
 
 from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model, TestableParameters, \
     LRTSpecification
 
 LOSS_CLAMP_VALUE = 1e30
+
+StateDict = OrderedDict[str, torch.Tensor]
 
 
 @dataclass
@@ -23,6 +25,13 @@ class TrainingResults:
     training_diverged: bool
 
 
+@dataclass
+class CacheForRegularization:
+    training_input_per_gene: list[tuple[GeneData, StateDict]]
+    dataset_metadata: DatasetMetadata
+    intron_specific_lfc: bool
+
+
 def train_model(model: Pol2Model,
                 gene_data: GeneData,
                 dataset_metadata: DatasetMetadata,
@@ -30,7 +39,9 @@ def train_model(model: Pol2Model,
                 reduced_matrix_name: Optional[str] = None,
                 max_epochs=200,
                 max_patience=5,
-                loss_change_tolerance=1e-6) -> tuple[Pol2Model, TrainingResults]:
+                loss_change_tolerance=1e-6,
+                regularization_coefficients_beta: Optional[torch.Tensor] = None,
+                regularization_coefficients_gamma: Optional[torch.Tensor] = None) -> tuple[Pol2Model, TrainingResults]:
     reduced_matrix = None if reduced_matrix_name is None else dataset_metadata.reduced_matrices[reduced_matrix_name]
 
     optimizer = optim.LBFGS(model.parameters(),
@@ -53,6 +64,10 @@ def train_model(model: Pol2Model,
                                 predicted_reads_exon=predicted_reads_exon,
                                 predicted_reads_intron=predicted_reads_intron,
                                 pi=pi)
+        if regularization_coefficients_beta is not None:
+            loss += torch.sum(regularization_coefficients_beta * torch.square(model.beta))
+        if regularization_coefficients_gamma is not None:
+            loss += torch.sum(regularization_coefficients_gamma * torch.square(model.gamma))
         if not torch.isfinite(loss):
             return torch.as_tensor(LOSS_CLAMP_VALUE, dtype=loss.dtype, device=loss.device)
         loss.backward()
@@ -64,12 +79,17 @@ def train_model(model: Pol2Model,
                                                                      log_library_sizes=dataset_metadata.log_library_sizes,
                                                                      isoform_length_offset=gene_data.isoform_length_offset,
                                                                      reduced_design_matrix=reduced_matrix)
-            return pol_2_total_loss(reads_exon=gene_data.exon_reads,
+            loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
                                     reads_introns=gene_data.intron_reads,
                                     coverage=gene_data.coverage,
                                     predicted_reads_exon=predicted_reads_exon,
                                     predicted_reads_intron=predicted_reads_intron,
                                     pi=pi)
+            if regularization_coefficients_beta is not None:
+                loss += torch.sum(regularization_coefficients_beta * torch.square(model.beta))
+            if regularization_coefficients_gamma is not None:
+                loss += torch.sum(regularization_coefficients_gamma * torch.square(model.gamma))
+            return loss
 
     previous_loss = None
     patience_counter = 0
@@ -190,7 +210,7 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     # assert hessian_subset.shape[0] == torch.linalg.matrix_rank(hessian_subset)    
 
     cov_matrix = torch.linalg.pinv(hessian_subset).cpu()
-    standard_errors = torch.sqrt(torch.diag(cov_matrix)).numpy()
+    standard_errors = torch.sqrt(torch.clamp(torch.diag(cov_matrix), min=0.0)).numpy()
 
     df_param['SE'] = np.nan
     df_param['z_score'] = np.nan
@@ -205,11 +225,11 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
     return df_param
 
 
-def get_results_for_gene(gene_data: GeneData,
-                         dataset_metadata: DatasetMetadata,
-                         intron_specific_lfc: bool,
-                         device='cpu'
-                         ) -> tuple[pd.DataFrame, pd.DataFrame]:
+def get_model_results(gene_data: GeneData,
+                      dataset_metadata: DatasetMetadata,
+                      intron_specific_lfc: bool,
+                      device='cpu'
+                      ) -> tuple[pd.DataFrame, pd.DataFrame, StateDict]:
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
     pol_2_total_loss = Pol2TotalLoss().to(device)
@@ -306,4 +326,45 @@ def get_results_for_gene(gene_data: GeneData,
                 test_results_list.append(test_result)
 
     test_results_df = pd.DataFrame(test_results_list)
-    return model_param_df, test_results_df
+    return model_param_df, test_results_df, model_full.state_dict()
+
+
+def get_regularized_model_results(gene_data: GeneData,
+                                  dataset_metadata: DatasetMetadata,
+                                  intron_specific_lfc: bool,
+                                  hot_start_state_dict: StateDict,
+                                  regularization_coefficients_df: pd.DataFrame,
+                                  device='cpu'
+                                  ) -> pd.DataFrame:
+    gene_data = gene_data.to(device)
+    dataset_metadata = dataset_metadata.to(device)
+    pol_2_total_loss = Pol2TotalLoss().to(device)
+    regularization_coefficients_df = regularization_coefficients_df.set_index(['parameter_type', 'feature_name'])
+
+    model_regularized = Pol2Model(feature_names=dataset_metadata.feature_names,
+                                  intron_names=gene_data.intron_names,
+                                  intron_specific_lfc=intron_specific_lfc).to(device)
+    model_regularized.load_state_dict(hot_start_state_dict)
+
+    regularization_coefficients_beta = torch.zeros((len(model_regularized.feature_names), 1)).to(device)
+    regularization_coefficients_gamma = torch.zeros((len(model_regularized.feature_names), 1)).to(device)
+    for feature_index, feature_name in enumerate(model_regularized.feature_names):
+        regularization_coefficients_beta[feature_index] = regularization_coefficients_df.loc[('beta', feature_name)][
+            'lambda']
+        regularization_coefficients_gamma[feature_index] = regularization_coefficients_df.loc[('gamma', feature_name)][
+            'lambda']
+
+    model_regularized, training_results_regularized = train_model(model=model_regularized,
+                                                                  gene_data=gene_data,
+                                                                  dataset_metadata=dataset_metadata,
+                                                                  pol_2_total_loss=pol_2_total_loss,
+                                                                  regularization_coefficients_beta=regularization_coefficients_beta,
+                                                                  regularization_coefficients_gamma=regularization_coefficients_gamma)
+
+    model_param_df = model_regularized.get_param_df()
+    model_param_df['gene_name'] = gene_data.gene_name
+    model_param_df['loss_regularized_model'] = training_results_regularized.final_loss
+    model_param_df['training_diverged_regularized_model'] = training_results_regularized.training_diverged
+    model_param_df[
+        'training_converged_within_max_epochs_regularized_model'] = training_results_regularized.converged_within_max_epochs
+    return model_param_df

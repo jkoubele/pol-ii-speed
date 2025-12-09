@@ -15,6 +15,8 @@ salmon_index_with_decoy: false  # If true, use decoy-aware Salmon indexing.
 # See Salmon documentation for details: https://salmon.readthedocs.io/en/latest/salmon.html#preparing-transcriptome-indices-mapping-based-mode
 # Can require lots of memory for larger genomes, we didn't manage to execute it for human genome even with 200GB RAM.
 
+custom_gene_list: null # Optional path to a CSV file with genes to fit the model on. If left null, all protein coding genes will be used.
+
 design_formula: "~your+design+formula" # Design formula, specified as formulas in R.
 intron_specific_lfc: false # Whether elongation speed and splicing speed LFC should be intron-specific (true) or gene-specific (false).
 
