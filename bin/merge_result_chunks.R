@@ -50,21 +50,6 @@ test_results_merged_df <- sort(test_results_files) |>
   keep(~nrow(.x) > 0) |>
   list_rbind()
 
-# test_results_cleaned_df <- test_results_merged_df |>
-#   mutate(
-#     parameter_type = case_when(
-#       tested_parameter == "alpha" ~ "gene_expression",
-#       tested_parameter == "beta" ~ "elongation_speed",
-#       tested_parameter == "gamma" ~ "splicing_speed",
-#       TRUE ~ tested_parameter
-#     ),
-#     # replace splicing time (parameter gamma) by splicing speed
-#     lfc = if_else(parameter_type == "splicing_speed", -lfc, lfc),
-#     l2fc = lfc / log(2)
-#   ) |>
-#   select(gene_name, intron_name, parameter_type, test_id, variable, group_1, group_2, l2fc, p_value, chi2_test_statistics)
-#
-# write_csv(test_results_cleaned_df, file.path(output_folder, 'test_results.csv'))
 write_csv(test_results_merged_df, file.path(output_folder, 'test_results_before_regularization.csv'))
 
 
