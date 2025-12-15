@@ -92,8 +92,8 @@ stopifnot(identical(colnames(avg_length_all), colnames(all_counts_matrix)))
 
 dds <- DESeqDataSetFromMatrix(
   countData = all_counts_matrix,
-  colData   = DataFrame(row.names = colnames(all_counts_matrix)),
-  design    = ~ 1
+  colData = DataFrame(row.names = colnames(all_counts_matrix)),
+  design = ~1
 )
 assays(dds)[["avgTxLength"]] <- avg_length_all
 
