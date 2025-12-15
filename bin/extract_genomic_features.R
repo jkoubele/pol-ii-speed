@@ -1,7 +1,10 @@
+#!/usr/bin/env Rscript
+
 library(argparse)
 library(rtracklayer)
 library(GenomicRanges)
 library(BiocParallel)
+library(readr)
 
 parser <- ArgumentParser()
 parser$add_argument("--gtf",
@@ -22,16 +25,8 @@ parser$add_argument("--min_constitutive_exon_length",
                     type = "integer",
                     default = 20)
 
-if (interactive()) {
-  args <- list(gtf = "/cellfile/datapublic/jkoubele/reference_genomes/ensembl_115_GRCm39/Mus_musculus.GRCm39.115.gtf",
-               threads = 4,
-               output_folder = "/cellfile/projects/pol_ii_speed/jkoubele/pol-ii-speed/test_genome_features",
-               min_intron_length = 50,
-               min_constitutive_exon_length = 20)
 
-} else {
-  args <- parser$parse_args()
-}
+args <- parser$parse_args()
 
 register(MulticoreParam(workers = args$threads, progressbar = FALSE))
 
@@ -45,20 +40,39 @@ gtf <- rtracklayer::import(args$gtf)
 genes <- gtf[gtf$type == "gene"]
 exons <- gtf[gtf$type == "exon"]
 
+genes <- genes[!is.na(genes$gene_id)]
+exons <- exons[!is.na(exons$gene_id)]
+
+# Extract gene IDs
+gene_type_column <- if ("gene_biotype" %in% names(mcols(genes))) {
+  "gene_biotype"
+} else if ("gene_type" %in% names(mcols(genes))) {
+  "gene_type"
+} else {
+  stop("Neither 'gene_biotype' nor 'gene_type' found in GTF attributes.")
+}
+
+all_gene_ids <- sort(unique(genes$gene_id))
+protein_coding_gene_ids <- sort(unique(genes$gene_id[mcols(genes)[[gene_type_column]] == "protein_coding"]))
+
+readr::write_csv(data.frame(gene_id = all_gene_ids),
+                 file.path(output_folder, "all_genes.csv"))
+readr::write_csv(data.frame(gene_id = protein_coding_gene_ids),
+                 file.path(output_folder, "protein_coding_genes.csv"))
+
 # Different anotations (Ensemble vs. Gencode) use different naming for UTRs
 utr_types <- intersect(c("five_prime_utr", "three_prime_utr", "UTR"), unique(gtf$type))
 
 exons_and_utr <- gtf[gtf$type %in% c("exon", utr_types)]
+exons_and_utr <- exons_and_utr[!is.na(exons_and_utr$gene_id)]
 
-# Split by gene
 exons_by_gene <- split(exons, exons$gene_id)
 gene_ranges_by_gene <- split(genes, genes$gene_id)
 exons_and_utr_by_gene <- split(exons_and_utr, exons_and_utr$gene_id)
 
-t0 <- Sys.time()
 # Extract introns
-introns_by_gene <- bplapply(names(gene_ranges_by_gene)[1:1000], function(gene_id) {
-  gene_range <- range(gene_ranges_by_gene[[gene_id]])
+introns_by_gene <- bplapply(names(gene_ranges_by_gene), function(gene_id) {
+  gene_range <- range(gene_ranges_by_gene[[gene_id]], ignore.strand = FALSE)
   exons_and_utr_ranges <- exons_and_utr_by_gene[[gene_id]]
 
   if (is.null(exons_and_utr_ranges) || length(exons_and_utr_ranges) == 0) {
@@ -70,11 +84,13 @@ introns_by_gene <- bplapply(names(gene_ranges_by_gene)[1:1000], function(gene_id
   introns <- GenomicRanges::setdiff(gene_range, exons_and_utr_ranges, ignore.strand = FALSE)
   introns
 })
-names(introns_by_gene) <- names(gene_ranges_by_gene)[1:1000]
+names(introns_by_gene) <- names(gene_ranges_by_gene)
 
 
 # Extract constitutive exons
-constitutive_exons_by_gene <- bplapply(exons_by_gene[1:1000], function(gene_exons) {
+constitutive_exons_by_gene <- bplapply(exons_by_gene, function(gene_exons) {
+  if (length(gene_exons) == 0) return(GRanges())
+
   transcripts_ids <- unique(gene_exons$transcript_id)
   num_transcripts <- length(transcripts_ids)
 
@@ -88,8 +104,6 @@ constitutive_exons_by_gene <- bplapply(exons_by_gene[1:1000], function(gene_exon
   atomic_exon_ranges[keep_mask]
 })
 
-t1 <- Sys.time()
-print(t1 - t0)
 
 constitutive_exons <- unlist(GRangesList(constitutive_exons_by_gene), use.names = TRUE)
 constitutive_exons$gene_id <- names(constitutive_exons)

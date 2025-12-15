@@ -53,6 +53,26 @@ process ExtractIntronsFromGTF {
     """
 }
 
+process ExtractGenomicFeatures {
+    input:
+    path gtf
+
+    output:
+        path('introns.bed'), emit: introns
+        path('constitutive_exons.bed'), emit: constitutive_exons
+        path("protein_coding_genes.csv"), emit: protein_coding_gene_names
+        path("all_genes.csv")
+
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/genomic_features", mode: 'copy'
+
+    script:
+    """
+    extract_genomic_features.R \
+        --gtf $gtf \
+        --threads 15
+    """
+}
+
 process GetGeneIDsFromGTF {
     input:
     path gtf
@@ -358,6 +378,8 @@ process AggregateReadCounts {
 }
 
 
+
+
 workflow preprocessing_workflow {
     take:
         samplesheet
@@ -421,6 +443,8 @@ workflow preprocessing_workflow {
         def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
         def gene_names = GetGeneIDsFromGTF(gtf_channel)
+
+        def genomic_features = ExtractGenomicFeatures(gtf_channel)
 
         def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
         def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
