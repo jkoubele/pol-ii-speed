@@ -28,7 +28,7 @@ parser$add_argument("--min_constitutive_exon_length",
 
 args <- parser$parse_args()
 
-register(MulticoreParam(workers = args$threads, progressbar = FALSE))
+register(SnowParam(workers = args$threads, type = "SOCK", progressbar = FALSE))
 
 output_folder <- args$output_folder
 if (!dir.exists(output_folder)) {
@@ -60,7 +60,7 @@ readr::write_csv(data.frame(gene_id = all_gene_ids),
 readr::write_csv(data.frame(gene_id = protein_coding_gene_ids),
                  file.path(output_folder, "protein_coding_genes.csv"))
 
-# Different anotations (Ensemble vs. Gencode) use different naming for UTRs
+# Different annotations (Ensemble vs. Gencode) use different naming for UTRs
 utr_types <- intersect(c("five_prime_utr", "three_prime_utr", "UTR"), unique(gtf$type))
 
 exons_and_utr <- gtf[gtf$type %in% c("exon", utr_types)]
@@ -71,19 +71,24 @@ gene_ranges_by_gene <- split(genes, genes$gene_id)
 exons_and_utr_by_gene <- split(exons_and_utr, exons_and_utr$gene_id)
 
 # Extract introns
-introns_by_gene <- bplapply(names(gene_ranges_by_gene), function(gene_id) {
-  gene_range <- range(gene_ranges_by_gene[[gene_id]], ignore.strand = FALSE)
-  exons_and_utr_ranges <- exons_and_utr_by_gene[[gene_id]]
+introns_by_gene <- bplapply(
+  names(gene_ranges_by_gene),
+  function(gene_id, gene_ranges_by_gene, exons_and_utr_by_gene) {
 
-  if (is.null(exons_and_utr_ranges) || length(exons_and_utr_ranges) == 0) {
-    warning("No exon/UTR for gene ", gene_id)
-    return(GRanges())
-  }
+    gene_range <- range(gene_ranges_by_gene[[gene_id]])
+    exons_and_utr_ranges <- exons_and_utr_by_gene[[gene_id]]
 
-  exons_and_utr_ranges <- GenomicRanges::reduce(exons_and_utr_ranges, ignore.strand = FALSE)
-  introns <- GenomicRanges::setdiff(gene_range, exons_and_utr_ranges, ignore.strand = FALSE)
-  introns
-})
+    if (is.null(exons_and_utr_ranges) || length(exons_and_utr_ranges) == 0) {
+      warning("No exon/UTR for gene ", gene_id)
+      return(GRanges())
+    }
+
+    exons_and_utr_ranges <- GenomicRanges::reduce(exons_and_utr_ranges, ignore.strand = FALSE)
+    GenomicRanges::setdiff(gene_range, exons_and_utr_ranges, ignore.strand = FALSE)
+  },
+  gene_ranges_by_gene = gene_ranges_by_gene,
+  exons_and_utr_by_gene = exons_and_utr_by_gene
+)
 names(introns_by_gene) <- names(gene_ranges_by_gene)
 
 
@@ -125,7 +130,7 @@ for (feature_name in names(features_list)) {
   num_overlapping_genes <- countOverlaps(features, genes, ignore.strand = FALSE)
   features <- features[num_overlapping_genes == 1]
 
-  # Assign exon number in the 5' to 3' direction
+  # Assign number in the 5' to 3' direction
   features <- features[order(features$gene_id, start(features), end(features))]
   feature_index_in_gene <- ave(seq_along(features),
                                features$gene_id,
