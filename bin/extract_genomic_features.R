@@ -30,10 +30,10 @@ if (interactive()) {
   args <- list(
     gtf = "/cellfile/datapublic/jkoubele/reference_genomes/ensembl_115_GRCm39/Mus_musculus.GRCm39.115.gtf",
     output_folder = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/mouse_age_dr/results/preprocessing/test_genomic_features",
-    threads=4,
-    min_intron_length=50,
-    min_constitutive_exon_length=20
-    
+    threads = 4,
+    min_intron_length = 50,
+    min_constitutive_exon_length = 20
+
   )
 } else {
   args <- parser$parse_args()
@@ -53,6 +53,7 @@ exons <- gtf[gtf$type == "exon"]
 
 genes <- genes[!is.na(genes$gene_id)]
 exons <- exons[!is.na(exons$gene_id)]
+
 
 # Extract gene IDs
 gene_type_column <- if ("gene_biotype" %in% names(mcols(genes))) {
@@ -83,7 +84,7 @@ exons_and_utr_by_gene <- split(exons_and_utr, exons_and_utr$gene_id)
 
 # Extract introns
 introns_by_gene <- bplapply(
-  names(gene_ranges_by_gene[1:100]),
+  names(gene_ranges_by_gene),
   function(gene_id, gene_ranges_by_gene, exons_and_utr_by_gene) {
 
     gene_range <- range(gene_ranges_by_gene[[gene_id]])
@@ -100,11 +101,11 @@ introns_by_gene <- bplapply(
   gene_ranges_by_gene = gene_ranges_by_gene,
   exons_and_utr_by_gene = exons_and_utr_by_gene
 )
-names(introns_by_gene) <- names(gene_ranges_by_gene[1:100])
+names(introns_by_gene) <- names(gene_ranges_by_gene)
 
 
 # Extract constitutive exons
-constitutive_exons_by_gene <- bplapply(exons_by_gene[1:100], function(gene_exons) {
+constitutive_exons_by_gene <- bplapply(exons_by_gene, function(gene_exons) {
   if (length(gene_exons) == 0) return(GRanges())
 
   transcripts_ids <- unique(gene_exons$transcript_id)
@@ -131,6 +132,7 @@ introns$gene_id <- names(introns)
 names(introns) <- NULL
 introns <- introns[width(introns) >= args$min_intron_length]
 
+
 features_list <- list(
   introns = introns,
   constitutive_exons = constitutive_exons
@@ -155,9 +157,17 @@ for (feature_name in names(features_list)) {
   features$number_in_gene[mask_minus_strand] <- num_features_in_gene[mask_minus_strand] + 1 - feature_index_in_gene[mask_minus_strand]
   features$name <- paste0(features$gene_id, "_", features$number_in_gene)
 
+  feature_genes <- genes[match(features$gene_id, genes$gene_id)]
+
+  features$mid <- (start(features) + end(features)) / 2
+  features$mid_relative <- (features$mid - start(feature_genes)) / width(feature_genes)
+  features$mid_relative[mask_minus_strand] <- 1 - features$mid_relative[mask_minus_strand]
+
+
   features$score <- 0
   features <- sort(features)
-  
+
+
   if (feature_name == "constitutive_exons") {
     mcols(features)$constitutive_exon_id <- features$name
     features$type <- "constitutive_exon"
@@ -165,12 +175,9 @@ for (feature_name in names(features_list)) {
     mcols(features)$intron_id <- features$name
     features$type <- "intron"
   }
-  
+
   rtracklayer::export(features, file.path(output_folder, paste0(feature_name, ".bed")), format = "BED")
   rtracklayer::export(features, file.path(output_folder, paste0(feature_name, ".gtf")), format = "GTF")
-  
-  # features_list[[feature_name]] <- features
+
 }
 
-# rtracklayer::export(features_list[["introns"]], file.path(output_folder, "introns.bed"), format = "BED")
-# rtracklayer::export(features_list[["constitutive_exons"]], file.path(output_folder, "constitutive_exons.bed"), format = "BED")
