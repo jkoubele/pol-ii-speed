@@ -26,18 +26,20 @@ parser$add_argument("--min_constitutive_exon_length",
                     default = 20)
 
 
-if (interactive()) {
-  args <- list(
-    gtf = "/cellfile/datapublic/jkoubele/reference_genomes/ensembl_115_GRCm39/Mus_musculus.GRCm39.115.gtf",
-    output_folder = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/mouse_age_dr/results/preprocessing/test_genomic_features",
-    threads = 4,
-    min_intron_length = 50,
-    min_constitutive_exon_length = 20
+# if (interactive()) {
+#   args <- list(
+#     gtf = "/cellfile/datapublic/jkoubele/reference_genomes/ensembl_115_GRCm39/Mus_musculus.GRCm39.115.gtf",
+#     output_folder = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/mouse_age_dr/results/preprocessing/test_genomic_features",
+#     threads = 6,
+#     min_intron_length = 50,
+#     min_constitutive_exon_length = 20
+# 
+#   )
+# } else {
+#   args <- parser$parse_args()
+# }
 
-  )
-} else {
-  args <- parser$parse_args()
-}
+args <- parser$parse_args()
 
 register(SnowParam(workers = args$threads, type = "SOCK", progressbar = FALSE))
 
@@ -153,15 +155,15 @@ for (feature_name in names(features_list)) {
                               FUN = length)
   mask_minus_strand <- as.character(strand(features)) == "-"
 
-  features$number_in_gene <- feature_index_in_gene
-  features$number_in_gene[mask_minus_strand] <- num_features_in_gene[mask_minus_strand] + 1 - feature_index_in_gene[mask_minus_strand]
-  features$name <- paste0(features$gene_id, "_", features$number_in_gene)
+  features$number_in_gene_5_to_3_prime <- feature_index_in_gene
+  features$number_in_gene_5_to_3_prime[mask_minus_strand] <- num_features_in_gene[mask_minus_strand] + 1 - feature_index_in_gene[mask_minus_strand]
+  features$name <- paste0(features$gene_id, "_", features$number_in_gene_5_to_3_prime)
 
   feature_genes <- genes[match(features$gene_id, genes$gene_id)]
 
   features$mid <- (start(features) + end(features)) / 2
-  features$mid_relative <- (features$mid - start(feature_genes)) / width(feature_genes)
-  features$mid_relative[mask_minus_strand] <- 1 - features$mid_relative[mask_minus_strand]
+  features$mid_relative_5_to_3_prime <- (features$mid - start(feature_genes)) / width(feature_genes)
+  features$mid_relative_5_to_3_prime[mask_minus_strand] <- 1 - features$mid_relative_5_to_3_prime[mask_minus_strand]
 
 
   features$score <- 0
