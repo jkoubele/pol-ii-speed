@@ -42,6 +42,8 @@ process ExtractGenomicFeatures {
     output:
         path('introns.bed'), emit: introns_bed_file
         path('constitutive_exons.bed'), emit: constitutive_exons_bed_file
+        path('introns.gtf'), emit: introns_gtf_file
+        path('constitutive_exons.gtf'), emit: constitutive_exons_gtf_file
         path("protein_coding_genes.csv"), emit: protein_coding_gene_names
         path("all_genes.csv")
 
@@ -216,33 +218,6 @@ process ExtractIntronicReads {
     """
 }
 
-process RemoveIntronicReadsFromFASTQ {
-    input:
-        tuple val(sample), path(read1), path(read2), path(bam_introns)
-
-    output:
-        tuple val(sample), path("R1.fastq.gz"), path("R2.fastq.gz"), emit: exonic_fastq
-
-    publishDir "${params.outdir}/${preprocessing_output_subfolder}/FASTQ_without_intronic_reads/${sample}", mode: 'copy'
-
-    tag "$sample"
-
-    script:
-    """
-    remove_intronic_reads_from_fastq.py \\
-        --bam_introns $bam_introns \\
-        --input_fastq $read1 \\
-        --output_fastq R1.fastq
-    pigz -f R1.fastq
-
-    remove_intronic_reads_from_fastq.py \\
-        --bam_introns $bam_introns \\
-        --input_fastq $read2 \\
-        --output_fastq R2.fastq
-    pigz -f R2.fastq
-    """
-}
-
 process SalmonQuantification {
     input:
         tuple val(sample), path(read1), path(read2), path(salmon_index)
@@ -344,8 +319,6 @@ process AggregateReadCounts {
 }
 
 
-
-
 workflow preprocessing_workflow {
     take:
         samplesheet
@@ -408,7 +381,6 @@ workflow preprocessing_workflow {
         def tx2gene_out = PrepareTx2Gene(gtf_channel)
         def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
-
         def genomic_features = ExtractGenomicFeatures(gtf_channel)
 
         def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
@@ -426,12 +398,8 @@ workflow preprocessing_workflow {
        .combine(genomic_features.introns_bed_file)
        | ExtractIntronicReads
 
-       def exonic_fastq = samples
+       def salmon_quant_out = samples
        .map { sample, r1, r2, strand -> tuple(sample, r1, r2) }
-       .join(extracted_intronic_reads.intronic_bam_files)
-       | RemoveIntronicReadsFromFASTQ
-
-       def salmon_quant_out = exonic_fastq.exonic_fastq
        .combine(salmon_index_channel) | SalmonQuantification
 
        def bed_graph_coverage = extracted_intronic_reads.intronic_bed_files
@@ -441,8 +409,6 @@ workflow preprocessing_workflow {
        .combine(genomic_features.introns_bed_file)| RescaleCoverage
 
        def rescaled_coverage_combined = rescaled_coverage.collect()
-
-
 
        def data_aggregation =  salmon_quant_out.salmon_quant
        .join(extracted_intronic_reads.intron_read_counts)
