@@ -10,8 +10,15 @@ parser <- ArgumentParser()
 parser$add_argument("--tx2gene",
                     required = TRUE,
                     help = "Path to tx2gene.tsv")
-parser$add_argument("--exon_quant_files", nargs = "+", required = TRUE)
-parser$add_argument("--intron_counts_files", nargs = "+", required = TRUE)
+parser$add_argument("--exon_quant_files",
+                    nargs = "+", 
+                    required = TRUE)
+parser$add_argument("--intron_counts_files", 
+                    nargs = "+", 
+                    required = TRUE)
+parser$add_argument("--constitutive_exon_counts_files", 
+                    nargs = "+", 
+                    required = TRUE)
 parser$add_argument("--sample_names", nargs = "+", required = TRUE)
 parser$add_argument("--output_folder", default = '.')
 
@@ -21,6 +28,7 @@ output_folder <- args$output_folder
 sample_names <- args$sample_names
 exon_quant_files <- args$exon_quant_files
 intron_counts_files <- args$intron_counts_files
+constitutive_exon_counts_files <- args$constitutive_exon_counts_files
 
 tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE) |>
   mutate(
@@ -33,7 +41,8 @@ if (!dir.exists(output_folder)) {
 }
 
 stopifnot(length(sample_names) == length(exon_quant_files),
-          length(sample_names) == length(intron_counts_files))
+          length(sample_names) == length(intron_counts_files),
+          length(sample_names) == length(constitutive_exon_counts_files))
 
 names(exon_quant_files) <- args$sample_names
 txi <- tximport(exon_quant_files,
@@ -57,11 +66,21 @@ intron_counts_by_sample <- map2(sample_names, intron_counts_files, function(samp
 intron_read_counts <- purrr::reduce(intron_counts_by_sample, full_join, by = "name") |>
   dplyr::rename(intron_id = name)
 
+constitutive_exon_counts_by_sample <- map2(sample_names, constitutive_exon_counts_files, function(sample, file) {
+  read_tsv(file, comment = "#", show_col_types = FALSE) |>
+    select(Geneid, NumReads) |>
+    set_names(c("constitutive_exon_id", sample))
+})
+
+constitutive_exon_read_counts <- purrr::reduce(constitutive_exon_counts_by_sample, full_join, by = "constitutive_exon_id") |>
+  dplyr::select(constitutive_exon_id, all_of(sample_names))
+
 exon_read_counts <- exon_read_counts |> select(gene_id, all_of(sample_names))
 intron_read_counts <- intron_read_counts |> select(intron_id, all_of(sample_names))
 
 write_tsv(exon_read_counts, file.path(args$output_folder, 'exon_counts.tsv'))
 write_tsv(intron_read_counts, file.path(args$output_folder, 'intron_counts.tsv'))
+write_tsv(constitutive_exon_read_counts, file.path(args$output_folder, "constitutive_exon_counts.tsv"))
 
 exon_counts_matrix <- exon_read_counts |>
   column_to_rownames("gene_id") |>

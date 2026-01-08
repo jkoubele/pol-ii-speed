@@ -328,11 +328,12 @@ process RescaleCoverage {
 
 process AggregateReadCounts {
     input:
-    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene)
+    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(constitutive_exon_counts_files), path(tx2gene)
 
     output:
         path("exon_counts.tsv"), emit: exon_counts
         path("intron_counts.tsv"), emit: intron_counts
+        path("constitutive_exon_counts.tsv"), emit: constitutive_exon_counts
         path("library_size_factors.tsv"), emit: library_size_factors
         path("isoform_length_factors.tsv"), emit: isoform_length_factors
 
@@ -344,7 +345,8 @@ process AggregateReadCounts {
       --tx2gene $tx2gene \
       --sample_names ${sample_names.join(' ')} \
       --exon_quant_files ${exon_quant_files.join(' ')} \
-      --intron_counts_files ${intron_counts_files.join(' ')}
+      --intron_counts_files ${intron_counts_files.join(' ')} \
+      --constitutive_exon_counts_files ${constitutive_exon_counts_files.join(' ')}
     """
 }
 
@@ -447,12 +449,14 @@ workflow preprocessing_workflow {
 
        def data_aggregation =  salmon_quant_out.salmon_quant
        .join(extracted_intronic_reads.intron_read_counts)
+       .join(constitutive_exons_read_counts.constitutive_exon_counts)
        .collect(flat: false).map { list_of_tuples ->
             def list_of_tuples_sorted = list_of_tuples.sort { it[0] }
             def sample_names = list_of_tuples_sorted*.getAt(0)
             def quant_files  = list_of_tuples_sorted*.getAt(1)
             def intron_files = list_of_tuples_sorted*.getAt(2)
-            tuple(sample_names, quant_files, intron_files)
+            def constitutive_exon_files = list_of_tuples_sorted*.getAt(3)
+            tuple(sample_names, quant_files, intron_files, constitutive_exon_files)
        }
        .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
 
@@ -463,5 +467,7 @@ workflow preprocessing_workflow {
         library_size_factors     = data_aggregation.library_size_factors
         isoform_length_factors   = data_aggregation.isoform_length_factors
         coverage_files           = rescaled_coverage_combined
+        constitutive_exon_counts = data_aggregation.constitutive_exon_counts
+
 
 }
