@@ -51,9 +51,9 @@ process ExtractGenomicFeatures {
 
     script:
     """
-    extract_genomic_features.R \
+    extract_genomic_features_from_gtf.R \
         --gtf $gtf \
-        --threads 15
+        --threads ${task.cpus}
     """
 }
 
@@ -213,8 +213,8 @@ process ExtractIntronicReads {
     sort -k 1,1 -k 2,2n intronic_reads_minus_strand.bed > tmp_minus_strand.bed
     mv tmp_minus_strand.bed intronic_reads_minus_strand.bed
 
-    pigz -f intronic_reads_plus_strand.bed
-    pigz -f intronic_reads_minus_strand.bed
+    pigz -p ${task.cpus} -f intronic_reads_plus_strand.bed
+    pigz -p ${task.cpus} -f intronic_reads_minus_strand.bed
     """
 }
 
@@ -262,7 +262,7 @@ process ComputeCoverage {
         -i $bed_file_plus \
         -g $genome_fai_file \
         > coverage_plus.bedGraph
-        pigz -f coverage_plus.bedGraph
+        pigz -p ${task.cpus} -f coverage_plus.bedGraph
 
     bedtools genomecov \
         -bga \
@@ -270,7 +270,7 @@ process ComputeCoverage {
         -i $bed_file_minus \
         -g $genome_fai_file \
         > coverage_minus.bedGraph
-        pigz -f coverage_minus.bedGraph
+        pigz -p ${task.cpus} -f coverage_minus.bedGraph
     """
 }
 

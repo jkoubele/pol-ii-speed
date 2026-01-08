@@ -26,7 +26,7 @@ class Alignment(NamedTuple):
     read_2: Optional[pysam.AlignedSegment] = None
 
 
-class GenomicFeature(NamedTuple):
+class Intron(NamedTuple):
     name: str
     chromosome: str
     strand: str
@@ -99,10 +99,10 @@ if __name__ == "__main__":
                         type=Path,
                         required=True,
                         help='Path to the input .bam file.')
-    parser.add_argument('--input_bed',
+    parser.add_argument('--intron_bed_file',
                         type=Path,
                         required=True,
-                        help='Path to the .bed file with genomic features.')
+                        help='Path to the .bed file with introns.')
     parser.add_argument('--output_folder',
                         type=Path,
                         default='.')
@@ -114,7 +114,7 @@ if __name__ == "__main__":
                         )
     parser.add_argument('--overlap_bp_threshold',
                         type=int,
-                        help='Min. overlap (in bp) between the read and genomic feature.',
+                        help='Min. overlap with intron needed to classify the read as intronic.',
                         default=10)
 
     parser.add_argument('--mapq_threshold',
@@ -146,47 +146,47 @@ if __name__ == "__main__":
 
     output_folder.mkdir(exist_ok=True, parents=True)
 
-    features_df = pd.read_csv(args.input_bed, sep='\t',
-                              names=['chromosome', 'start', 'end', 'name', 'score', 'strand'])
-    features_by_chrom_and_strand: dict[ChromAndStrand, list[GenomicFeature]] = defaultdict(list)
-    for name, chromosome, strand, start, end in zip(features_df['name'],
-                                                    features_df['chromosome'],
-                                                    features_df['strand'],
-                                                    features_df['start'],
-                                                    features_df['end']):
-        genomic_feature = GenomicFeature(name=name,
-                                         chromosome=chromosome,
-                                         strand=strand,
-                                         start=start,
-                                         end=end,
-                                         interval=py_interval([start, end]))
-        features_by_chrom_and_strand[ChromAndStrand(chromosome=genomic_feature.chromosome,
-                                                    strand=genomic_feature.strand)].append(genomic_feature)
+    introns_df = pd.read_csv(args.intron_bed_file, sep='\t',
+                             names=['chromosome', 'start', 'end', 'name', 'score', 'strand'])
+    introns_by_chrom_and_strand: dict[ChromAndStrand, list[Intron]] = defaultdict(list)
+    for name, chromosome, strand, start, end in zip(introns_df['name'],
+                                                    introns_df['chromosome'],
+                                                    introns_df['strand'],
+                                                    introns_df['start'],
+                                                    introns_df['end']):
+        intron = Intron(name=name,
+                        chromosome=chromosome,
+                        strand=strand,
+                        start=start,
+                        end=end,
+                        interval=py_interval([start, end]))
+        introns_by_chrom_and_strand[ChromAndStrand(chromosome=intron.chromosome,
+                                                   strand=intron.strand)].append(intron)
 
-    read_counts = {feature.name: 0 for feature in chain.from_iterable(features_by_chrom_and_strand.values())}
-    features_by_chrom_and_strand = {key: sorted(value, key=lambda x: x.start) for
-                                    key, value in features_by_chrom_and_strand.items()}
+    read_counts = {intron.name: 0 for intron in chain.from_iterable(introns_by_chrom_and_strand.values())}
+    introns_by_chrom_and_strand = {key: sorted(value, key=lambda x: x.start) for
+                                   key, value in introns_by_chrom_and_strand.items()}
 
-    # Check whether features are not overlapping
-    for feature_list in features_by_chrom_and_strand.values():
-        for feature_1, feature_2 in zip(feature_list, feature_list[1:]):
-            if feature_1.end > feature_2.start:
+    # Check whether introns are not overlapping
+    for intron_list in introns_by_chrom_and_strand.values():
+        for intron_1, intron_2 in zip(intron_list, intron_list[1:]):
+            if intron_1.end > intron_2.start:
                 raise ValueError(
-                    f"Overlapping features detected:\n"
-                    f"{feature_1.name=}, {feature_1.start=}, {feature_1.end=} \n"
-                    f"{feature_2.name=}, {feature_2.start=}, {feature_2.end=} \n"
-                    f"Please provide a .bed file with non-overlapping features."
+                    f"Overlapping introns detected:\n"
+                    f"{intron_1.name=}, {intron_1.start=}, {intron_1.end=} \n"
+                    f"{intron_2.name=}, {intron_2.start=}, {intron_2.end=} \n"
+                    f"Please provide a .bed file with non-overlapping introns."
                 )
 
-    feature_starts_by_chrom_and_strand = {key: [feature.start for feature in value] for
-                                          key, value in features_by_chrom_and_strand.items()}
-    feature_ends_by_chrom_and_strand = {key: [feature.end for feature in value] for
-                                        key, value in features_by_chrom_and_strand.items()}
+    intron_starts_by_chrom_and_strand = {key: [intron.start for intron in value] for
+                                         key, value in introns_by_chrom_and_strand.items()}
+    intron_ends_by_chrom_and_strand = {key: [intron.end for intron in value] for
+                                       key, value in introns_by_chrom_and_strand.items()}
 
-    output_unsorted_bam_path = output_folder / 'reads_unsorted.bam'
-    output_sorted_bam_path = output_folder / 'reads_sorted.bam'
-    output_bed_plus_strand_path = Path(output_folder / 'reads_plus_strand.bed')
-    output_bed_minus_strand_path = Path(output_folder / 'reads_minus_strand.bed')
+    output_unsorted_bam_path = output_folder / 'intronic_reads_unsorted.bam'
+    output_sorted_bam_path = output_folder / 'intronic_reads_sorted.bam'
+    output_bed_plus_strand_path = Path(output_folder / 'intronic_reads_plus_strand.bed')
+    output_bed_minus_strand_path = Path(output_folder / 'intronic_reads_minus_strand.bed')
 
     bam_input = pysam.AlignmentFile(Path(args.input_bam), "rb")
 
@@ -201,37 +201,37 @@ if __name__ == "__main__":
         bed_output_minus_strand = open(output_bed_minus_strand_path, 'a')
 
     for alignment in generate_alignments(bam_input=bam_input,
-                                         paired=args.paired_sequencing,
+                                         paired=True,
                                          strandendess_type=strandendess_type,
                                          mapq_threshold=args.mapq_threshold):
-        feature_list = features_by_chrom_and_strand.get(ChromAndStrand(alignment.chromosome, alignment.strand))
-        if not feature_list:
-            continue  # for a case that no features are present on given contig, e.g. introns on MtDNA
+        intron_list = introns_by_chrom_and_strand.get(ChromAndStrand(alignment.chromosome, alignment.strand))
+        if not intron_list:
+            continue  # for a case that no introns are present on given contig, e.g. for MtDNA
         aligned_blocks = py_interval(*(
             alignment.read_1.get_blocks() if alignment.read_2 is None else alignment.read_1.get_blocks() + alignment.read_2.get_blocks()))
 
-        feature_starts = feature_starts_by_chrom_and_strand[ChromAndStrand(alignment.chromosome, alignment.strand)]
-        feature_ends = feature_ends_by_chrom_and_strand[ChromAndStrand(alignment.chromosome, alignment.strand)]
+        intron_starts = intron_starts_by_chrom_and_strand[ChromAndStrand(alignment.chromosome, alignment.strand)]
+        intron_ends = intron_ends_by_chrom_and_strand[ChromAndStrand(alignment.chromosome, alignment.strand)]
 
         alignment_start = aligned_blocks[0][0]
         alignment_end = aligned_blocks[-1][1]
 
-        feature_index_lower_bound = bisect.bisect_left(feature_ends, alignment_start)
-        feature_index_upper_bound = bisect.bisect_right(feature_starts, alignment_end)
+        intron_index_lower_bound = bisect.bisect_left(intron_ends, alignment_start)
+        intron_index_upper_bound = bisect.bisect_right(intron_starts, alignment_end)
 
-        aligned_to_feature = False
-        for genomic_feature in feature_list[feature_index_lower_bound:feature_index_upper_bound]:
-            interval_intersection = genomic_feature.interval & aligned_blocks
+        aligned_to_intron = False
+        for intron in intron_list[intron_index_lower_bound:intron_index_upper_bound]:
+            interval_intersection = intron.interval & aligned_blocks
             overlap_length = sum([interval[1] - interval[0] for interval in interval_intersection])
 
             if overlap_length >= overlap_bp_threshold:
-                aligned_to_feature = True
-                read_counts[genomic_feature.name] += 1
+                aligned_to_intron = True
+                read_counts[intron.name] += 1
                 if create_bed_output:
                     for read in (alignment.read_1, alignment.read_2):
                         if read is None:
                             continue
-                        read_blocks = genomic_feature.interval & py_interval(*read.get_blocks())
+                        read_blocks = intron.interval & py_interval(*read.get_blocks())
                         for block in read_blocks:
                             if alignment.strand == '+':
                                 bed_output_plus_strand.write(
@@ -240,7 +240,7 @@ if __name__ == "__main__":
                                 bed_output_minus_strand.write(
                                     f"{alignment.chromosome}\t{int(block[0])}\t{int(block[1])}\n")
 
-        if aligned_to_feature:
+        if aligned_to_intron:
             if create_bam_output:
                 bam_output.write(alignment.read_1)
                 if alignment.read_2 is not None:
@@ -248,9 +248,9 @@ if __name__ == "__main__":
 
     bam_input.close()
 
-    features_df = features_df.set_index('name', drop=False).drop(columns=['score'])
-    features_df['count'] = pd.Series(read_counts)
-    features_df.to_csv(output_folder / 'read_counts.tsv', sep='\t', index=False)
+    introns_df = introns_df.set_index('name', drop=False).drop(columns=['score'])
+    introns_df['count'] = pd.Series(read_counts)
+    introns_df.to_csv(output_folder / 'intron_read_counts.tsv', sep='\t', index=False)
 
     if create_bam_output:
         bam_output.close()
