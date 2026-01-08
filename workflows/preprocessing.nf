@@ -243,6 +243,36 @@ process SalmonQuantification {
     """
 }
 
+process ConstitutiveExonsFeatureCounts {
+    input:
+        tuple val(sample), path(bam), val(strand), path(constitutive_exons_gtf_file)
+
+    output:
+        tuple val(sample), path("${sample}.constitutive_exons.txt"), emit: constitutive_exon_counts
+        path "${sample}.constitutive_exons.txt.summary"
+
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/constitutive_exons_read_count/${sample}", mode: 'copy'
+
+    tag "$sample"
+
+    script:
+    def strandedness_argument = (strand == 'forward') ? 1 : (strand == 'reverse') ? 2 : 0
+    """
+    featureCounts \
+      -a ${constitutive_exons_gtf_file} \
+      -t constitutive_exon \
+      -g constitutive_exon_id \
+      -p -s ${strandedness_argument} -B -C -T ${task.cpus} \
+      -o ${sample}.constitutive_exons.txt \
+      ${bam}
+
+    # Rename last header column (named after the BAM file by default) to 'NumReads'
+    awk 'BEGIN{OFS="\t"} \$0 !~ /^#/ && !done { \$NF="NumReads"; done=1 } { print }' \
+     ${sample}.constitutive_exons.txt > ${sample}.constitutive_exons.tmp \
+     && mv ${sample}.constitutive_exons.tmp ${sample}.constitutive_exons.txt
+    """
+}
+
 process ComputeCoverage {
     input:
         tuple val(sample), path(bed_file_plus), path(bed_file_minus), path(genome_fai_file)
@@ -392,6 +422,11 @@ workflow preprocessing_workflow {
         .map { sample, r1, r2, strand, star_index ->
             tuple(sample, r1, r2, star_index)
         } | STARAlign
+
+        def constitutive_exons_read_counts = aligned_bams.star_bam
+       .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
+       .combine(genomic_features.constitutive_exons_gtf_file)
+       | ConstitutiveExonsFeatureCounts
 
        def extracted_intronic_reads = aligned_bams.star_bam
        .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
