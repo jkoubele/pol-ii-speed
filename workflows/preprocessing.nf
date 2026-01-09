@@ -336,6 +336,7 @@ process AggregateReadCounts {
         path("constitutive_exon_counts.tsv"), emit: constitutive_exon_counts
         path("library_size_factors.tsv"), emit: library_size_factors
         path("isoform_length_factors.tsv"), emit: isoform_length_factors
+        path("reads_distribution.png")
 
     publishDir "${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts", mode: 'copy'
 
@@ -468,6 +469,5 @@ workflow preprocessing_workflow {
         isoform_length_factors   = data_aggregation.isoform_length_factors
         coverage_files           = rescaled_coverage_combined
         constitutive_exon_counts = data_aggregation.constitutive_exon_counts
-
 
 }
