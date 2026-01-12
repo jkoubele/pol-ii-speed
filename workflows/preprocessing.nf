@@ -328,7 +328,7 @@ process RescaleCoverage {
 
 process AggregateReadCounts {
     input:
-    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(constitutive_exon_counts_files), path(tx2gene)
+    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(constitutive_exon_counts_files), path(tx2gene), path(protein_coding_gene_names)
 
     output:
         path("exon_counts.tsv"), emit: exon_counts
@@ -336,7 +336,8 @@ process AggregateReadCounts {
         path("constitutive_exon_counts.tsv"), emit: constitutive_exon_counts
         path("library_size_factors.tsv"), emit: library_size_factors
         path("isoform_length_factors.tsv"), emit: isoform_length_factors
-        path("reads_distribution.png")
+        path("reads_distribution_all_genes.png")
+        path("reads_distribution_protein_coding_genes.png")
 
     publishDir "${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts", mode: 'copy'
 
@@ -347,7 +348,8 @@ process AggregateReadCounts {
       --sample_names ${sample_names.join(' ')} \
       --exon_quant_files ${exon_quant_files.join(' ')} \
       --intron_counts_files ${intron_counts_files.join(' ')} \
-      --constitutive_exon_counts_files ${constitutive_exon_counts_files.join(' ')}
+      --constitutive_exon_counts_files ${constitutive_exon_counts_files.join(' ')} \
+      --protein_coding_genes_csv ${protein_coding_gene_names}
     """
 }
 
@@ -459,7 +461,8 @@ workflow preprocessing_workflow {
             def constitutive_exon_files = list_of_tuples_sorted*.getAt(3)
             tuple(sample_names, quant_files, intron_files, constitutive_exon_files)
        }
-       .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
+       .combine(tx2gene_out.tx2gene_file)
+       .combine(genomic_features.protein_coding_gene_names) | AggregateReadCounts
 
     emit:
         gene_names_file          = genomic_features.protein_coding_gene_names
