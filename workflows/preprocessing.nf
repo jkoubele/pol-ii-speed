@@ -262,7 +262,12 @@ process ConstitutiveExonsFeatureCounts {
       -a ${constitutive_exons_gtf_file} \
       -t constitutive_exon \
       -g constitutive_exon_id \
-      -p -s ${strandedness_argument} -B -C -T ${task.cpus} \
+      -p --countReadPairs \
+      -s ${strandedness_argument} \
+      -B \
+      -C \
+      -O \
+      -T ${task.cpus} \
       -o ${sample}.constitutive_exons.txt \
       ${bam}
 
