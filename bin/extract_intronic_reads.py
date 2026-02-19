@@ -147,8 +147,10 @@ if __name__ == "__main__":
 
     output_folder.mkdir(exist_ok=True, parents=True)
 
-    introns_df = pd.read_csv(args.intron_bed_file, sep='\t',
-                             names=['chromosome', 'start', 'end', 'name', 'score', 'strand'])
+    introns_df = pd.read_csv(args.intron_bed_file,
+                             sep='\t',
+                             names=['chromosome', 'start', 'end', 'name', 'score', 'strand'],
+                             dtype={"chromosome": "string", "strand": "string"})
     introns_by_chrom_and_strand: dict[ChromAndStrand, list[Intron]] = defaultdict(list)
     for name, chromosome, strand, start, end in zip(introns_df['name'],
                                                     introns_df['chromosome'],
