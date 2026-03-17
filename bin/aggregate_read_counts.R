@@ -22,11 +22,12 @@ sample_names <- args$sample_names
 exon_quant_files <- args$exon_quant_files
 intron_counts_files <- args$intron_counts_files
 
-tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE) |>
-  mutate(
-    TXNAME = sub("\\|.*$", "", TXNAME),
-    TXNAME = sub("\\.[0-9]+$", "", TXNAME)
-  )
+tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE)
+# tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE) |>
+#   mutate(
+#     TXNAME = sub("\\|.*$", "", TXNAME),
+#     TXNAME = sub("\\.[0-9]+$", "", TXNAME)
+#   )
 
 if (!dir.exists(output_folder)) {
   dir.create(output_folder, recursive = TRUE)
@@ -36,11 +37,14 @@ stopifnot(length(sample_names) == length(exon_quant_files),
           length(sample_names) == length(intron_counts_files))
 
 names(exon_quant_files) <- args$sample_names
-txi <- tximport(exon_quant_files,
-                type = "salmon",
-                tx2gene = tx2gene,
-                ignoreTxVersion = TRUE,
-                countsFromAbundance = 'no')
+
+txi <- tximport(
+  exon_quant_files,
+  type = "salmon",
+  tx2gene = tx2gene,
+  ignoreTxVersion = FALSE,
+  countsFromAbundance = "no"
+)
 
 exon_read_counts <- as.data.frame(txi$counts) |>
   rownames_to_column(var = "gene_id")
@@ -92,8 +96,8 @@ stopifnot(identical(colnames(avg_length_all), colnames(all_counts_matrix)))
 
 dds <- DESeqDataSetFromMatrix(
   countData = all_counts_matrix,
-  colData   = DataFrame(row.names = colnames(all_counts_matrix)),
-  design    = ~ 1
+  colData = DataFrame(row.names = colnames(all_counts_matrix)),
+  design = ~1
 )
 assays(dds)[["avgTxLength"]] <- avg_length_all
 
