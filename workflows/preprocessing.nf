@@ -34,41 +34,28 @@ process MultiQC {
     """
 }
 
-process ExtractIntronsFromGTF {
-    input:
-    path gtf
-    val gtf_source
-
-    output:
-    path("introns.bed"), emit: introns_bed_file
-
-    publishDir "${params.outdir}/${preprocessing_output_subfolder}/extracted_introns", mode: 'copy'
-
-
-    script:
-    """
-    extract_introns_from_gtf.py \
-        --gtf_file $gtf \
-        --gtf_source ${gtf_source}
-    """
-}
-
-process GetGeneIDsFromGTF {
+process ExtractGenomicFeatures {
     input:
     path gtf
 
     output:
+        path('introns.bed'), emit: introns_bed_file
+        path('constitutive_exons.bed'), emit: constitutive_exons_bed_file
+        path('introns.gtf'), emit: introns_gtf_file
+        path('constitutive_exons.gtf'), emit: constitutive_exons_gtf_file
         path("protein_coding_genes.csv"), emit: protein_coding_gene_names
         path("all_genes.csv")
 
-    publishDir "${params.outdir}/${preprocessing_output_subfolder}/gene_names", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/genomic_features", mode: 'copy'
 
     script:
     """
-    get_gene_ids_from_gtf.R \
-        --gtf_file $gtf
+    extract_genomic_features_from_gtf.R \
+        --gtf $gtf \
+        --threads ${task.cpus}
     """
 }
+
 
 process BuildStarIndex {
     input:
@@ -398,7 +385,7 @@ workflow preprocessing_workflow {
                 salmon_index_with_decoy).salmon_index_dir
         }
 
-        samples = Channel
+        def samples = Channel
             .fromPath(samplesheet)
             .splitCsv(header: true)
             .map { row ->
@@ -416,11 +403,10 @@ workflow preprocessing_workflow {
                 tuple(sample, fq1, fq2, strand)
             }
 
-        def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel, gtf_source).introns_bed_file
         def tx2gene_out = PrepareTx2Gene(gtf_channel)
         def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
-        def gene_names = GetGeneIDsFromGTF(gtf_channel)
+        def genomic_features = ExtractGenomicFeatures(gtf_channel)
 
         def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
         def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
@@ -434,7 +420,7 @@ workflow preprocessing_workflow {
 
        def extracted_intronic_reads = aligned_bams.star_bam
        .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
-       .combine(introns_bed_channel)
+       .combine(genomic_features.introns_bed_file)
        | ExtractIntronicReads
 
        def exonic_fastq = samples
@@ -449,11 +435,9 @@ workflow preprocessing_workflow {
        .combine(fai_index)| ComputeCoverage
 
        def rescaled_coverage = bed_graph_coverage.bed_graph_files
-       .combine(introns_bed_channel)| RescaleCoverage
+       .combine(genomic_features.introns_bed_file)| RescaleCoverage
 
        def rescaled_coverage_combined = rescaled_coverage.collect()
-
-
 
        def data_aggregation =  salmon_quant_out.salmon_quant
        .join(extracted_intronic_reads.intron_read_counts)
@@ -467,7 +451,7 @@ workflow preprocessing_workflow {
        .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
 
     emit:
-        gene_names_file          = gene_names.protein_coding_gene_names
+        gene_names_file          = genomic_features.protein_coding_gene_names
         exon_counts              = data_aggregation.exon_counts
         intron_counts            = data_aggregation.intron_counts
         library_size_factors     = data_aggregation.library_size_factors
