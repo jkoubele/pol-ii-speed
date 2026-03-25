@@ -225,8 +225,8 @@ process ExtractIntronicReads {
     sort -k 1,1 -k 2,2n intronic_reads_minus_strand.bed > tmp_minus_strand.bed
     mv tmp_minus_strand.bed intronic_reads_minus_strand.bed
 
-    pigz -f intronic_reads_plus_strand.bed
-    pigz -f intronic_reads_minus_strand.bed
+    pigz -p ${task.cpus} -f intronic_reads_plus_strand.bed
+    pigz -p ${task.cpus} -f intronic_reads_minus_strand.bed
     """
 }
 
@@ -247,13 +247,13 @@ process RemoveIntronicReadsFromFASTQ {
         --bam_introns $bam_introns \\
         --input_fastq $read1 \\
         --output_fastq R1.fastq
-    pigz -f R1.fastq
+    pigz -p ${task.cpus} -f R1.fastq
 
     remove_intronic_reads_from_fastq.py \\
         --bam_introns $bam_introns \\
         --input_fastq $read2 \\
         --output_fastq R2.fastq
-    pigz -f R2.fastq
+    pigz -p ${task.cpus} -f R2.fastq
     """
 }
 
@@ -301,7 +301,7 @@ process ComputeCoverage {
         -i $bed_file_plus \
         -g $genome_fai_file \
         > coverage_plus.bedGraph
-        pigz -f coverage_plus.bedGraph
+        pigz -p ${task.cpus} -f coverage_plus.bedGraph
 
     bedtools genomecov \
         -bga \
@@ -309,7 +309,7 @@ process ComputeCoverage {
         -i $bed_file_minus \
         -g $genome_fai_file \
         > coverage_minus.bedGraph
-        pigz -f coverage_minus.bedGraph
+        pigz -p ${task.cpus} -f coverage_minus.bedGraph
     """
 }
 
