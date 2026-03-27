@@ -29,7 +29,8 @@ workflow {
             params.gtf_source,
             params.salmon_index_with_decoy,
             params.star_index,
-            params.salmon_index)
+            params.salmon_index,
+            params.transcript_matching_mode)
     }
 
     if (['model', 'all'].contains(params.stage)) {

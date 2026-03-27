@@ -13,20 +13,31 @@ parser$add_argument("--tx2gene",
 parser$add_argument("--exon_quant_files", nargs = "+", required = TRUE)
 parser$add_argument("--intron_counts_files", nargs = "+", required = TRUE)
 parser$add_argument("--sample_names", nargs = "+", required = TRUE)
+parser$add_argument("--transcript_matching_mode", required = TRUE)
 parser$add_argument("--output_folder", default = '.')
 
 args <- parser$parse_args()
+
+TRANSCRIPT_MATCHING_MODES <- list(
+  EXACT = "exact",
+  STRIP_ENSEMBL_TRANSCRIPT_VERSION = "strip_ensembl_transcript_version"
+)
+
+if (!(args$transcript_matching_mode %in% unlist(TRANSCRIPT_MATCHING_MODES))) {
+  stop(
+    "Invalid --transcript_matching_mode: ", args$transcript_matching_mode,
+    ". Allowed values are: ", paste(unlist(TRANSCRIPT_MATCHING_MODES), collapse = ", ")
+  )
+}
 
 output_folder <- args$output_folder
 sample_names <- args$sample_names
 exon_quant_files <- args$exon_quant_files
 intron_counts_files <- args$intron_counts_files
+transcript_matching_mode <- args$transcript_matching_mode
 
-tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE) |>
-  mutate(
-    TXNAME = sub("\\|.*$", "", TXNAME),
-    TXNAME = sub("\\.[0-9]+$", "", TXNAME)
-  )
+
+tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE)
 
 if (!dir.exists(output_folder)) {
   dir.create(output_folder, recursive = TRUE)
@@ -36,10 +47,12 @@ stopifnot(length(sample_names) == length(exon_quant_files),
           length(sample_names) == length(intron_counts_files))
 
 names(exon_quant_files) <- args$sample_names
+
+ignore_tx_version <- transcript_matching_mode == TRANSCRIPT_MATCHING_MODES$STRIP_ENSEMBL_TRANSCRIPT_VERSION
 txi <- tximport(exon_quant_files,
                 type = "salmon",
                 tx2gene = tx2gene,
-                ignoreTxVersion = TRUE,
+                ignoreTxVersion = ignore_tx_version,
                 countsFromAbundance = 'no')
 
 exon_read_counts <- as.data.frame(txi$counts) |>
@@ -60,8 +73,8 @@ intron_read_counts <- purrr::reduce(intron_counts_by_sample, full_join, by = "na
 exon_read_counts <- exon_read_counts |> select(gene_id, all_of(sample_names))
 intron_read_counts <- intron_read_counts |> select(intron_id, all_of(sample_names))
 
-write_tsv(exon_read_counts, file.path(args$output_folder, 'exon_counts.tsv'))
-write_tsv(intron_read_counts, file.path(args$output_folder, 'intron_counts.tsv'))
+write_tsv(exon_read_counts, file.path(output_folder, 'exon_counts.tsv'))
+write_tsv(intron_read_counts, file.path(output_folder, 'intron_counts.tsv'))
 
 exon_counts_matrix <- exon_read_counts |>
   column_to_rownames("gene_id") |>
@@ -92,8 +105,8 @@ stopifnot(identical(colnames(avg_length_all), colnames(all_counts_matrix)))
 
 dds <- DESeqDataSetFromMatrix(
   countData = all_counts_matrix,
-  colData   = DataFrame(row.names = colnames(all_counts_matrix)),
-  design    = ~ 1
+  colData = DataFrame(row.names = colnames(all_counts_matrix)),
+  design = ~1
 )
 assays(dds)[["avgTxLength"]] <- avg_length_all
 
