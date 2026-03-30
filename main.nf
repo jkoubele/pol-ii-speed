@@ -12,7 +12,14 @@ workflow {
 
     if (['preprocess', 'all'].contains(params.stage)) {
         // Run pre-processing workflow
-        if (!params.samplesheet || !params.fastq_dir || !params.gtf_file || !params.genome_fasta || !params.transcriptome_fasta || params.salmon_index_with_decoy == null || !params.gtf_source) {
+        if (!params.samplesheet ||
+            !params.fastq_dir ||
+            !params.gtf_file ||
+            !params.genome_fasta ||
+            !params.transcriptome_fasta ||
+            params.salmon_index_with_decoy == null ||
+            !params.gtf_source ||
+            params.ignore_tx_version == null) {
             error("Missing required parameters! Please run with -params-file <your_params.yaml>.")
         }
 
