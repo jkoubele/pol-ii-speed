@@ -25,20 +25,6 @@ parser$add_argument("--min_constitutive_exon_length",
                     type = "integer",
                     default = 20)
 
-
-# if (interactive()) {
-#   args <- list(
-#     gtf = "/cellfile/datapublic/jkoubele/reference_genomes/ensembl_115_GRCm39/Mus_musculus.GRCm39.115.gtf",
-#     output_folder = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/mouse_age_dr/results/preprocessing/test_genomic_features",
-#     threads = 6,
-#     min_intron_length = 50,
-#     min_constitutive_exon_length = 20
-# 
-#   )
-# } else {
-#   args <- parser$parse_args()
-# }
-
 args <- parser$parse_args()
 
 register(SnowParam(workers = args$threads, type = "SOCK", progressbar = FALSE))
