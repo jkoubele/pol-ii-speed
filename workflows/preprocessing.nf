@@ -324,13 +324,14 @@ process RescaleCoverage {
 
 process AggregateReadCounts {
     input:
-    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene), val(ignore_tx_version)
+    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene), val(ignore_tx_version), file(protein_coding_genes_csv)
 
     output:
         path("exon_counts.tsv"), emit: exon_counts
         path("intron_counts.tsv"), emit: intron_counts
         path("library_size_factors.tsv"), emit: library_size_factors
         path("isoform_length_factors.tsv"), emit: isoform_length_factors
+        path("*.png")
 
     publishDir "${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts", mode: 'copy'
 
@@ -341,7 +342,8 @@ process AggregateReadCounts {
       --sample_names ${sample_names.join(' ')} \
       --exon_quant_files ${exon_quant_files.join(' ')} \
       --intron_counts_files ${intron_counts_files.join(' ')} \
-      --ignore_tx_version $ignore_tx_version
+      --ignore_tx_version $ignore_tx_version \
+      --protein_coding_genes_csv $protein_coding_genes_csv
     """
 }
 
@@ -453,7 +455,8 @@ workflow preprocessing_workflow {
             tuple(sample_names, quant_files, intron_files)
        }
        .combine(tx2gene_out.tx2gene_file)
-       .combine(ignore_tx_version_channel) | AggregateReadCounts
+       .combine(ignore_tx_version_channel)
+       .combine(genomic_features.protein_coding_gene_names) | AggregateReadCounts
 
     emit:
         gene_names_file          = genomic_features.protein_coding_gene_names

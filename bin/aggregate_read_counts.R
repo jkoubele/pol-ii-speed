@@ -14,6 +14,7 @@ parser$add_argument("--exon_quant_files", nargs = "+", required = TRUE)
 parser$add_argument("--intron_counts_files", nargs = "+", required = TRUE)
 parser$add_argument("--sample_names", nargs = "+", required = TRUE)
 parser$add_argument("--ignore_tx_version", required = TRUE, help = "true or false")
+parser$add_argument("--protein_coding_genes_csv", required = TRUE)
 parser$add_argument("--output_folder", default = '.')
 
 args <- parser$parse_args()
@@ -127,3 +128,137 @@ length_size_factors_genes |>
   as.data.frame() |>
   rownames_to_column(var = "gene_id") |>
   write_tsv(file.path(output_folder, "isoform_length_factors.tsv"))
+
+
+# Create barplots with read distribution per sample
+
+# Plot for all genes:
+exon_counts_total_per_sample <- exon_read_counts |>
+  select(-gene_id) |>
+  summarise(across(everything(), sum, na.rm = TRUE)) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample",
+    values_to = "exonic_reads"
+  )
+
+intron_counts_total_per_sample <- intron_read_counts |>
+  select(-intron_id) |>
+  summarise(across(everything(), sum, na.rm = TRUE)) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample",
+    values_to = "intronic_reads"
+  )
+
+reads_total_per_sample <- exon_counts_total_per_sample |>
+  inner_join(intron_counts_total_per_sample, by = "sample") |>
+  mutate(
+    total_reads = exonic_reads + intronic_reads,
+    intronic_read_fraction = intronic_reads / total_reads
+  )
+
+barplot_df <- reads_total_per_sample |>
+  pivot_longer(
+    cols = c(exonic_reads, intronic_reads),
+    names_to = "type",
+    values_to = "reads"
+  )
+
+barplot <- ggplot(barplot_df, aes(sample, reads, fill = type)) +
+  geom_col(position = position_stack(reverse = TRUE)) +
+  geom_text(
+    data = reads_total_per_sample,
+    aes(x = sample, y = total_reads,
+        label = scales::percent(intronic_read_fraction, accuracy = 0.1)),
+    inherit.aes = FALSE,
+    hjust = -0.1,
+    size = 3
+  ) +
+  scale_fill_manual(
+    values = c(exonic_reads = "red", intronic_reads = "blue"),
+    labels = c(exonic_reads = "Exonic (transcripts)", intronic_reads = "Intronic")
+  ) +
+  coord_flip() +
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  labs(title = "Reads by sample",
+       subtitle = "Labels show intronic fraction",
+       x = NULL,
+       y = "Reads",
+       fill = NULL) +
+  scale_y_continuous(labels = scales::comma)
+
+ggsave(file.path(output_folder, "reads_distribution_all_genes.png"),
+       plot = barplot,
+       bg = 'white')
+
+# Plot for protein coding genes only:
+
+protein_coding_genes <- read_csv(args$protein_coding_genes_csv)
+protein_coding_gene_ids <- protein_coding_genes$gene_id
+
+exon_counts_total_per_sample_protein_coding <- exon_read_counts |>
+  filter(gene_id %in% protein_coding_gene_ids) |>
+  select(-gene_id) |>
+  summarise(across(everything(), sum, na.rm = TRUE)) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample",
+    values_to = "exonic_reads"
+  )
+
+intron_counts_total_per_sample_protein_coding <- intron_read_counts |>
+  filter(sub("_.*$", "", intron_id) %in% protein_coding_gene_ids) |>
+  select(-intron_id) |>
+  summarise(across(everything(), sum, na.rm = TRUE)) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample",
+    values_to = "intronic_reads"
+  )
+
+reads_total_per_sample_protein_coding <- exon_counts_total_per_sample_protein_coding |>
+  inner_join(intron_counts_total_per_sample_protein_coding, by = "sample") |>
+  mutate(
+    total_reads = exonic_reads + intronic_reads,
+    intronic_read_fraction = intronic_reads / total_reads
+  )
+
+barplot_df_protein_coding <- reads_total_per_sample_protein_coding |>
+  pivot_longer(
+    cols = c(exonic_reads, intronic_reads),
+    names_to = "type",
+    values_to = "reads"
+  )
+
+barplot_protein_coding <- ggplot(barplot_df_protein_coding, aes(sample, reads, fill = type)) +
+  geom_col(position = position_stack(reverse = TRUE)) +
+  geom_text(
+    data = reads_total_per_sample_protein_coding,
+    aes(x = sample, y = total_reads,
+        label = scales::percent(intronic_read_fraction, accuracy = 0.1)),
+    inherit.aes = FALSE,
+    hjust = -0.1,
+    size = 3
+  ) +
+  scale_fill_manual(
+    values = c(exonic_reads = "red", intronic_reads = "blue"),
+    labels = c(exonic_reads = "Exonic (transcripts)", intronic_reads = "Intronic")
+  ) +
+  coord_flip() +
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  labs(title = "Reads by sample (protein coding genes only)",
+       subtitle = "Labels show intronic fraction",
+       x = NULL,
+       y = "Reads",
+       fill = NULL) +
+  scale_y_continuous(labels = scales::comma)
+
+ggsave(file.path(output_folder, "reads_distribution_protein_coding_genes.png"),
+       plot = barplot_protein_coding,
+       bg = 'white')
+
