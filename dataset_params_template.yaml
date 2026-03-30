@@ -15,7 +15,12 @@ salmon_index_with_decoy: false  # If true, use decoy-aware Salmon indexing.
 # See Salmon documentation for details: https://salmon.readthedocs.io/en/latest/salmon.html#preparing-transcriptome-indices-mapping-based-mode
 # Can require lots of memory for larger genomes, we didn't manage to execute it for human genome even with 200GB RAM.
 
-transcript_matching_mode: 'strip_ensembl_transcript_version' # Either  'exact' or 'strip_ensembl_transcript_version'
+ignore_tx_version: true # Passed to tximport (argument ignoreTxVersion). If true, ignores transcript version suffixes (e.g. ".1") when matching transcript IDs.
+# Should be true when transcript IDs in the transcriptome FASTA contain version suffixes that are not present in the corresponding GTF.
+# This is typically required for Ensembl human and mouse references.
+# Should be false when transcript IDs match exactly between FASTA and GTF.
+# For example, in the C. Elegans annotation from Ensembl, transcript suffixes are part of the true transcript IDs in both FASTA and GTF,
+# and setting this argument to true would lead to incorrect transcript-to-gene mapping.
 
 custom_gene_list: null # Optional path to a CSV file with genes to fit the model on. If left null, all protein coding genes will be used.
 

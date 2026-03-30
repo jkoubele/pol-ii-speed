@@ -13,29 +13,26 @@ parser$add_argument("--tx2gene",
 parser$add_argument("--exon_quant_files", nargs = "+", required = TRUE)
 parser$add_argument("--intron_counts_files", nargs = "+", required = TRUE)
 parser$add_argument("--sample_names", nargs = "+", required = TRUE)
-parser$add_argument("--transcript_matching_mode", required = TRUE)
+parser$add_argument("--ignore_tx_version", required = TRUE, help = "true or false")
 parser$add_argument("--output_folder", default = '.')
 
 args <- parser$parse_args()
 
-TRANSCRIPT_MATCHING_MODES <- list(
-  EXACT = "exact",
-  STRIP_ENSEMBL_TRANSCRIPT_VERSION = "strip_ensembl_transcript_version"
-)
+ignore_tx_version_lower <- tolower(args$ignore_tx_version)
 
-if (!(args$transcript_matching_mode %in% unlist(TRANSCRIPT_MATCHING_MODES))) {
+if (!(ignore_tx_version_lower %in% c("true", "false"))) {
   stop(
-    "Invalid --transcript_matching_mode: ", args$transcript_matching_mode,
-    ". Allowed values are: ", paste(unlist(TRANSCRIPT_MATCHING_MODES), collapse = ", ")
+    "Invalid --ignore_tx_version: ", args$ignore_tx_version,
+    ". Allowed values are: true, false."
   )
 }
+
+ignore_tx_version <- ignore_tx_version_lower == "true"
 
 output_folder <- args$output_folder
 sample_names <- args$sample_names
 exon_quant_files <- args$exon_quant_files
 intron_counts_files <- args$intron_counts_files
-transcript_matching_mode <- args$transcript_matching_mode
-
 
 tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE)
 
@@ -48,7 +45,6 @@ stopifnot(length(sample_names) == length(exon_quant_files),
 
 names(exon_quant_files) <- args$sample_names
 
-ignore_tx_version <- transcript_matching_mode == TRANSCRIPT_MATCHING_MODES$STRIP_ENSEMBL_TRANSCRIPT_VERSION
 txi <- tximport(exon_quant_files,
                 type = "salmon",
                 tx2gene = tx2gene,

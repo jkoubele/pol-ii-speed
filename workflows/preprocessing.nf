@@ -324,7 +324,7 @@ process RescaleCoverage {
 
 process AggregateReadCounts {
     input:
-    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene), val(transcript_matching_mode)
+    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene), val(ignore_tx_version)
 
     output:
         path("exon_counts.tsv"), emit: exon_counts
@@ -341,7 +341,7 @@ process AggregateReadCounts {
       --sample_names ${sample_names.join(' ')} \
       --exon_quant_files ${exon_quant_files.join(' ')} \
       --intron_counts_files ${intron_counts_files.join(' ')} \
-      --transcript_matching_mode $transcript_matching_mode
+      --transcript_matching_mode $ignore_tx_version
     """
 }
 
@@ -357,14 +357,14 @@ workflow preprocessing_workflow {
         salmon_index_with_decoy
         star_index
         salmon_index
-        transcript_matching_mode
+        ignore_tx_version
 
     main:
         def gtf_channel = Channel.value(file(gtf_file))
         def genome_fasta_channel = Channel.value(file(genome_fasta))
         def transcriptome_fasta_channel = Channel.value(file(transcriptome_fasta))
 
-        def transcript_matching_mode_channel = Channel.value(transcript_matching_mode)
+        def ignore_tx_version_channel = Channel.value(ignore_tx_version)
 
         def star_index_channel
         if (star_index) {
@@ -453,7 +453,7 @@ workflow preprocessing_workflow {
             tuple(sample_names, quant_files, intron_files)
        }
        .combine(tx2gene_out.tx2gene_file)
-       .combine(transcript_matching_mode_channel) | AggregateReadCounts
+       .combine(ignore_tx_version_channel) | AggregateReadCounts
 
     emit:
         gene_names_file          = genomic_features.protein_coding_gene_names

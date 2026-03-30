@@ -51,11 +51,15 @@ and filling it according to the comments. We will now discuss several parameter 
   recommendations
   from the STAR documentation for details on how to choose the reference genome files
   (see section *2: Generating genome indexes* of
-  the [manual](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf)).
+  the [manual](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf)). Typically, the *primary assembly* version of the annotation is the correct one to use.
 
-  Also, since Ensembl and Gencode annotations slightly differ, the used source needs to be stated in the *gtf_source*
+  Since Ensembl and Gencode annotations slightly differ, the used source needs to be stated in the *gtf_source*
   parameter
   (supported values are ```"ensembl"``` and ```"gencode"```).
+
+  We are using [tximport](https://bioconductor.org/packages/release/bioc/html/tximport.html) package to import transcript abundances from Salmon. Tximport requires
+  argument *ignoreTxVersion*, which typically should be true for human or mouse reference annotation from Ensemble, and false 
+  for most other references. 
 * **STAR and Salmon indices**: You can optionally pre-build the STAR index and/or Salmon index yourself and provide the
   path to it. If no path
   is provided (the parameter is left ```null```), the index will be built from the provided genome/transcriptome files.
