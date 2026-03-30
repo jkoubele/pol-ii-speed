@@ -341,7 +341,7 @@ process AggregateReadCounts {
       --sample_names ${sample_names.join(' ')} \
       --exon_quant_files ${exon_quant_files.join(' ')} \
       --intron_counts_files ${intron_counts_files.join(' ')} \
-      --transcript_matching_mode $ignore_tx_version
+      --ignore_tx_version $ignore_tx_version
     """
 }
 
