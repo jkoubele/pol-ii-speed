@@ -34,41 +34,28 @@ process MultiQC {
     """
 }
 
-process ExtractIntronsFromGTF {
-    input:
-    path gtf
-    val gtf_source
-
-    output:
-    path("introns.bed"), emit: introns_bed_file
-
-    publishDir "${params.outdir}/${preprocessing_output_subfolder}/extracted_introns", mode: 'copy'
-
-
-    script:
-    """
-    extract_introns_from_gtf.py \
-        --gtf_file $gtf \
-        --gtf_source ${gtf_source}
-    """
-}
-
-process GetGeneIDsFromGTF {
+process ExtractGenomicFeatures {
     input:
     path gtf
 
     output:
+        path('introns.bed'), emit: introns_bed_file
+        path('constitutive_exons.bed'), emit: constitutive_exons_bed_file
+        path('introns.gtf'), emit: introns_gtf_file
+        path('constitutive_exons.gtf'), emit: constitutive_exons_gtf_file
         path("protein_coding_genes.csv"), emit: protein_coding_gene_names
         path("all_genes.csv")
 
-    publishDir "${params.outdir}/${preprocessing_output_subfolder}/gene_names", mode: 'copy'
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/genomic_features", mode: 'copy'
 
     script:
     """
-    get_gene_ids_from_gtf.R \
-        --gtf_file $gtf
+    extract_genomic_features_from_gtf.R \
+        --gtf $gtf \
+        --threads ${task.cpus}
     """
 }
+
 
 process BuildStarIndex {
     input:
@@ -225,8 +212,8 @@ process ExtractIntronicReads {
     sort -k 1,1 -k 2,2n intronic_reads_minus_strand.bed > tmp_minus_strand.bed
     mv tmp_minus_strand.bed intronic_reads_minus_strand.bed
 
-    pigz -f intronic_reads_plus_strand.bed
-    pigz -f intronic_reads_minus_strand.bed
+    pigz -p ${task.cpus} -f intronic_reads_plus_strand.bed
+    pigz -p ${task.cpus} -f intronic_reads_minus_strand.bed
     """
 }
 
@@ -247,13 +234,13 @@ process RemoveIntronicReadsFromFASTQ {
         --bam_introns $bam_introns \\
         --input_fastq $read1 \\
         --output_fastq R1.fastq
-    pigz -f R1.fastq
+    pigz -p ${task.cpus} -f R1.fastq
 
     remove_intronic_reads_from_fastq.py \\
         --bam_introns $bam_introns \\
         --input_fastq $read2 \\
         --output_fastq R2.fastq
-    pigz -f R2.fastq
+    pigz -p ${task.cpus} -f R2.fastq
     """
 }
 
@@ -301,7 +288,7 @@ process ComputeCoverage {
         -i $bed_file_plus \
         -g $genome_fai_file \
         > coverage_plus.bedGraph
-        pigz -f coverage_plus.bedGraph
+        pigz -p ${task.cpus} -f coverage_plus.bedGraph
 
     bedtools genomecov \
         -bga \
@@ -309,7 +296,7 @@ process ComputeCoverage {
         -i $bed_file_minus \
         -g $genome_fai_file \
         > coverage_minus.bedGraph
-        pigz -f coverage_minus.bedGraph
+        pigz -p ${task.cpus} -f coverage_minus.bedGraph
     """
 }
 
@@ -337,13 +324,14 @@ process RescaleCoverage {
 
 process AggregateReadCounts {
     input:
-    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene)
+    tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene), val(ignore_tx_version), file(protein_coding_genes_csv)
 
     output:
         path("exon_counts.tsv"), emit: exon_counts
         path("intron_counts.tsv"), emit: intron_counts
         path("library_size_factors.tsv"), emit: library_size_factors
         path("isoform_length_factors.tsv"), emit: isoform_length_factors
+        path("*.png")
 
     publishDir "${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts", mode: 'copy'
 
@@ -353,7 +341,9 @@ process AggregateReadCounts {
       --tx2gene $tx2gene \
       --sample_names ${sample_names.join(' ')} \
       --exon_quant_files ${exon_quant_files.join(' ')} \
-      --intron_counts_files ${intron_counts_files.join(' ')}
+      --intron_counts_files ${intron_counts_files.join(' ')} \
+      --ignore_tx_version $ignore_tx_version \
+      --protein_coding_genes_csv $protein_coding_genes_csv
     """
 }
 
@@ -369,11 +359,14 @@ workflow preprocessing_workflow {
         salmon_index_with_decoy
         star_index
         salmon_index
+        ignore_tx_version
 
     main:
         def gtf_channel = Channel.value(file(gtf_file))
         def genome_fasta_channel = Channel.value(file(genome_fasta))
         def transcriptome_fasta_channel = Channel.value(file(transcriptome_fasta))
+
+        def ignore_tx_version_channel = Channel.value(ignore_tx_version)
 
         def star_index_channel
         if (star_index) {
@@ -398,7 +391,7 @@ workflow preprocessing_workflow {
                 salmon_index_with_decoy).salmon_index_dir
         }
 
-        samples = Channel
+        def samples = Channel
             .fromPath(samplesheet)
             .splitCsv(header: true)
             .map { row ->
@@ -416,11 +409,10 @@ workflow preprocessing_workflow {
                 tuple(sample, fq1, fq2, strand)
             }
 
-        def introns_bed_channel = ExtractIntronsFromGTF(gtf_channel, gtf_source).introns_bed_file
         def tx2gene_out = PrepareTx2Gene(gtf_channel)
         def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
-        def gene_names = GetGeneIDsFromGTF(gtf_channel)
+        def genomic_features = ExtractGenomicFeatures(gtf_channel)
 
         def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
         def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
@@ -434,7 +426,7 @@ workflow preprocessing_workflow {
 
        def extracted_intronic_reads = aligned_bams.star_bam
        .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
-       .combine(introns_bed_channel)
+       .combine(genomic_features.introns_bed_file)
        | ExtractIntronicReads
 
        def exonic_fastq = samples
@@ -449,11 +441,9 @@ workflow preprocessing_workflow {
        .combine(fai_index)| ComputeCoverage
 
        def rescaled_coverage = bed_graph_coverage.bed_graph_files
-       .combine(introns_bed_channel)| RescaleCoverage
+       .combine(genomic_features.introns_bed_file)| RescaleCoverage
 
        def rescaled_coverage_combined = rescaled_coverage.collect()
-
-
 
        def data_aggregation =  salmon_quant_out.salmon_quant
        .join(extracted_intronic_reads.intron_read_counts)
@@ -464,10 +454,12 @@ workflow preprocessing_workflow {
             def intron_files = list_of_tuples_sorted*.getAt(2)
             tuple(sample_names, quant_files, intron_files)
        }
-       .combine(tx2gene_out.tx2gene_file) | AggregateReadCounts
+       .combine(tx2gene_out.tx2gene_file)
+       .combine(ignore_tx_version_channel)
+       .combine(genomic_features.protein_coding_gene_names) | AggregateReadCounts
 
     emit:
-        gene_names_file          = gene_names.protein_coding_gene_names
+        gene_names_file          = genomic_features.protein_coding_gene_names
         exon_counts              = data_aggregation.exon_counts
         intron_counts            = data_aggregation.intron_counts
         library_size_factors     = data_aggregation.library_size_factors

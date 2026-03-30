@@ -13,20 +13,29 @@ parser$add_argument("--tx2gene",
 parser$add_argument("--exon_quant_files", nargs = "+", required = TRUE)
 parser$add_argument("--intron_counts_files", nargs = "+", required = TRUE)
 parser$add_argument("--sample_names", nargs = "+", required = TRUE)
+parser$add_argument("--ignore_tx_version", required = TRUE, help = "true or false")
+parser$add_argument("--protein_coding_genes_csv", required = TRUE)
 parser$add_argument("--output_folder", default = '.')
 
 args <- parser$parse_args()
+
+ignore_tx_version_lower <- tolower(args$ignore_tx_version)
+
+if (!(ignore_tx_version_lower %in% c("true", "false"))) {
+  stop(
+    "Invalid --ignore_tx_version: ", args$ignore_tx_version,
+    ". Allowed values are: true, false."
+  )
+}
+
+ignore_tx_version <- ignore_tx_version_lower == "true"
 
 output_folder <- args$output_folder
 sample_names <- args$sample_names
 exon_quant_files <- args$exon_quant_files
 intron_counts_files <- args$intron_counts_files
 
-tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE) |>
-  mutate(
-    TXNAME = sub("\\|.*$", "", TXNAME),
-    TXNAME = sub("\\.[0-9]+$", "", TXNAME)
-  )
+tx2gene <- read_tsv(args$tx2gene, show_col_types = FALSE)
 
 if (!dir.exists(output_folder)) {
   dir.create(output_folder, recursive = TRUE)
@@ -36,10 +45,11 @@ stopifnot(length(sample_names) == length(exon_quant_files),
           length(sample_names) == length(intron_counts_files))
 
 names(exon_quant_files) <- args$sample_names
+
 txi <- tximport(exon_quant_files,
                 type = "salmon",
                 tx2gene = tx2gene,
-                ignoreTxVersion = TRUE,
+                ignoreTxVersion = ignore_tx_version,
                 countsFromAbundance = 'no')
 
 exon_read_counts <- as.data.frame(txi$counts) |>
@@ -60,8 +70,8 @@ intron_read_counts <- purrr::reduce(intron_counts_by_sample, full_join, by = "na
 exon_read_counts <- exon_read_counts |> select(gene_id, all_of(sample_names))
 intron_read_counts <- intron_read_counts |> select(intron_id, all_of(sample_names))
 
-write_tsv(exon_read_counts, file.path(args$output_folder, 'exon_counts.tsv'))
-write_tsv(intron_read_counts, file.path(args$output_folder, 'intron_counts.tsv'))
+write_tsv(exon_read_counts, file.path(output_folder, 'exon_counts.tsv'))
+write_tsv(intron_read_counts, file.path(output_folder, 'intron_counts.tsv'))
 
 exon_counts_matrix <- exon_read_counts |>
   column_to_rownames("gene_id") |>
@@ -92,8 +102,8 @@ stopifnot(identical(colnames(avg_length_all), colnames(all_counts_matrix)))
 
 dds <- DESeqDataSetFromMatrix(
   countData = all_counts_matrix,
-  colData   = DataFrame(row.names = colnames(all_counts_matrix)),
-  design    = ~ 1
+  colData = DataFrame(row.names = colnames(all_counts_matrix)),
+  design = ~1
 )
 assays(dds)[["avgTxLength"]] <- avg_length_all
 
@@ -118,3 +128,137 @@ length_size_factors_genes |>
   as.data.frame() |>
   rownames_to_column(var = "gene_id") |>
   write_tsv(file.path(output_folder, "isoform_length_factors.tsv"))
+
+
+# Create barplots with read distribution per sample
+
+# Plot for all genes:
+exon_counts_total_per_sample <- exon_read_counts |>
+  select(-gene_id) |>
+  summarise(across(everything(), sum, na.rm = TRUE)) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample",
+    values_to = "exonic_reads"
+  )
+
+intron_counts_total_per_sample <- intron_read_counts |>
+  select(-intron_id) |>
+  summarise(across(everything(), sum, na.rm = TRUE)) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample",
+    values_to = "intronic_reads"
+  )
+
+reads_total_per_sample <- exon_counts_total_per_sample |>
+  inner_join(intron_counts_total_per_sample, by = "sample") |>
+  mutate(
+    total_reads = exonic_reads + intronic_reads,
+    intronic_read_fraction = intronic_reads / total_reads
+  )
+
+barplot_df <- reads_total_per_sample |>
+  pivot_longer(
+    cols = c(exonic_reads, intronic_reads),
+    names_to = "type",
+    values_to = "reads"
+  )
+
+barplot <- ggplot(barplot_df, aes(sample, reads, fill = type)) +
+  geom_col(position = position_stack(reverse = TRUE)) +
+  geom_text(
+    data = reads_total_per_sample,
+    aes(x = sample, y = total_reads,
+        label = scales::percent(intronic_read_fraction, accuracy = 0.1)),
+    inherit.aes = FALSE,
+    hjust = -0.1,
+    size = 3
+  ) +
+  scale_fill_manual(
+    values = c(exonic_reads = "red", intronic_reads = "blue"),
+    labels = c(exonic_reads = "Exonic (transcripts)", intronic_reads = "Intronic")
+  ) +
+  coord_flip() +
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  labs(title = "Reads by sample",
+       subtitle = "Labels show intronic fraction",
+       x = NULL,
+       y = "Reads",
+       fill = NULL) +
+  scale_y_continuous(labels = scales::comma)
+
+ggsave(file.path(output_folder, "reads_distribution_all_genes.png"),
+       plot = barplot,
+       bg = 'white')
+
+# Plot for protein coding genes only:
+
+protein_coding_genes <- read_csv(args$protein_coding_genes_csv)
+protein_coding_gene_ids <- protein_coding_genes$gene_id
+
+exon_counts_total_per_sample_protein_coding <- exon_read_counts |>
+  filter(gene_id %in% protein_coding_gene_ids) |>
+  select(-gene_id) |>
+  summarise(across(everything(), sum, na.rm = TRUE)) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample",
+    values_to = "exonic_reads"
+  )
+
+intron_counts_total_per_sample_protein_coding <- intron_read_counts |>
+  filter(sub("_.*$", "", intron_id) %in% protein_coding_gene_ids) |>
+  select(-intron_id) |>
+  summarise(across(everything(), sum, na.rm = TRUE)) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample",
+    values_to = "intronic_reads"
+  )
+
+reads_total_per_sample_protein_coding <- exon_counts_total_per_sample_protein_coding |>
+  inner_join(intron_counts_total_per_sample_protein_coding, by = "sample") |>
+  mutate(
+    total_reads = exonic_reads + intronic_reads,
+    intronic_read_fraction = intronic_reads / total_reads
+  )
+
+barplot_df_protein_coding <- reads_total_per_sample_protein_coding |>
+  pivot_longer(
+    cols = c(exonic_reads, intronic_reads),
+    names_to = "type",
+    values_to = "reads"
+  )
+
+barplot_protein_coding <- ggplot(barplot_df_protein_coding, aes(sample, reads, fill = type)) +
+  geom_col(position = position_stack(reverse = TRUE)) +
+  geom_text(
+    data = reads_total_per_sample_protein_coding,
+    aes(x = sample, y = total_reads,
+        label = scales::percent(intronic_read_fraction, accuracy = 0.1)),
+    inherit.aes = FALSE,
+    hjust = -0.1,
+    size = 3
+  ) +
+  scale_fill_manual(
+    values = c(exonic_reads = "red", intronic_reads = "blue"),
+    labels = c(exonic_reads = "Exonic (transcripts)", intronic_reads = "Intronic")
+  ) +
+  coord_flip() +
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  labs(title = "Reads by sample (protein coding genes only)",
+       subtitle = "Labels show intronic fraction",
+       x = NULL,
+       y = "Reads",
+       fill = NULL) +
+  scale_y_continuous(labels = scales::comma)
+
+ggsave(file.path(output_folder, "reads_distribution_protein_coding_genes.png"),
+       plot = barplot_protein_coding,
+       bg = 'white')
+
