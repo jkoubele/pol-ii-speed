@@ -302,7 +302,7 @@ process ComputeCoverage {
 
 process RescaleCoverage {
     input:
-        tuple val(sample), path(bedgraph_file_plus), path(bedgraph_file_minus), path(introns_bed_file)
+        tuple val(sample), path(bedgraph_file_plus), path(bedgraph_file_minus), path(intron_counts_file), path(introns_bed_file)
 
 
     output:
@@ -318,7 +318,8 @@ process RescaleCoverage {
         --bed_graph_plus $bedgraph_file_plus \
         --bed_graph_minus $bedgraph_file_minus \
         --introns_bed_file $introns_bed_file \
-        --output_file_basename $sample
+        --output_file_basename $sample \
+        --introns_count_file $intron_counts_file
     """
 }
 
@@ -441,6 +442,7 @@ workflow preprocessing_workflow {
        .combine(fai_index)| ComputeCoverage
 
        def rescaled_coverage = bed_graph_coverage.bed_graph_files
+       .join(extracted_intronic_reads.intron_read_counts)
        .combine(genomic_features.introns_bed_file)| RescaleCoverage
 
        def rescaled_coverage_combined = rescaled_coverage.collect()
