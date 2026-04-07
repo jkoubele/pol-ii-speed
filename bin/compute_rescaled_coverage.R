@@ -34,7 +34,8 @@ parser$add_argument("--num_bins",
 args <- parser$parse_args()
 
 introns <- read_tsv(args$introns_bed_file,
-                    col_names = c("chromosome", "start", "end", "name", "score", "strand")
+                    col_names = c("chromosome", "start", "end", "name", "score", "strand"),
+                    show_col_types = FALSE
 )
 
 bed_graph_plus <- import.bedGraph(args$bed_graph_plus)
