@@ -323,6 +323,24 @@ process RescaleCoverage {
     """
 }
 
+process IntronMetacoveragePlots {
+    input:
+        tuple path(coverage_parquet_files), path(introns_bed_file), path(gene_names_csv)
+
+    output:
+    path("*.png")
+
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/intron_metacoverage_plots", mode: 'copy'
+
+    script:
+    """
+    plot_intron_metacoverage.py \
+        --coverage_data_folder . \
+        --introns_bed_file $introns_bed_file \
+        --gene_names $gene_names_csv \
+    """
+}
+
 process AggregateReadCounts {
     input:
     tuple val(sample_names), path(exon_quant_files), path(intron_counts_files), path(tx2gene), val(ignore_tx_version), file(protein_coding_genes_csv)
@@ -446,6 +464,14 @@ workflow preprocessing_workflow {
        .combine(genomic_features.introns_bed_file)| RescaleCoverage
 
        def rescaled_coverage_combined = rescaled_coverage.collect()
+
+       def metacoverage_plot_input = rescaled_coverage.coverage_parquet_file
+       .collect()
+       .map { files -> tuple([files]) }   //  Wrapping in an extra list prevents unwanted flattening behavior in .combine()
+       .combine(genomic_features.introns_bed_file)
+       .combine(genomic_features.protein_coding_gene_names)
+
+       IntronMetacoveragePlots(metacoverage_plot_input)
 
        def data_aggregation =  salmon_quant_out.salmon_quant
        .join(extracted_intronic_reads.intron_read_counts)
