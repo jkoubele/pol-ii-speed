@@ -1,0 +1,113 @@
+#!/usr/bin/env Rscript
+
+library(argparse)
+library(tidyverse)
+
+
+if (interactive()) {
+  args <- list(
+    exon_counts_tsv = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/aggregated_counts/exon_counts.tsv",
+    intron_counts_tsv = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/aggregated_counts/intron_counts.tsv",
+    all_genes_csv = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/genomic_features/all_genes.csv",
+    protein_coding_genes_csv = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/genomic_features/protein_coding_genes.csv",
+    output_folder = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/modelable_genes/",
+    min_count_exons = 5,
+    min_count_introns = 5,
+    min_samples = 3
+  )
+} else {
+    parser <- ArgumentParser()
+    parser$add_argument("--exon_counts_tsv", required = TRUE)
+    parser$add_argument("--intron_counts_tsv", required = TRUE)
+    parser$add_argument("--all_genes_csv", required = TRUE)
+    parser$add_argument("--protein_coding_genes_csv", required = TRUE)
+    
+    parser$add_argument("--output_folder", default = '.')
+    
+    parser$add_argument("--min_count_exons", type = "integer", default = 5)
+    parser$add_argument("--min_count_introns", type = "integer", default = 5)
+    parser$add_argument("--min_samples", type = "integer", default = 3)
+    
+    args <- parser$parse_args()
+}
+
+output_folder <- args$output_folder
+dir.create(output_folder, recursive = TRUE, showWarnings = FALSE)
+
+min_count_exons <- args$min_count_exons
+min_count_introns <- args$min_count_introns
+min_samples <- args$min_samples
+
+intron_counts_df <- read_tsv(args$intron_counts_tsv, show_col_types = FALSE)
+all_genes_df <- read_csv(args$all_genes_csv)
+
+sample_columns <- setdiff(colnames(intron_counts_df), "intron_id")
+
+intron_summary <- intron_counts_df |>
+  mutate(
+    gene_id = sub("_[^_]+$", "", intron_id),
+    num_intron_supporting_samples = rowSums(across(all_of(sample_columns)) >= min_count_introns),
+    is_modelable = num_intron_supporting_samples >= min_samples,
+    num_intron_reads = rowSums(across(all_of(sample_columns)))
+  ) |>
+  select(-all_of(sample_columns))
+
+modelable_introns <- intron_summary |>
+  filter(is_modelable)
+
+non_modelable_introns <- intron_summary |>
+  filter(!is_modelable) |>
+  mutate(reason_for_exclusion = "low_intron_read_count")
+
+modelable_introns |> write_tsv(file.path(output_folder, 'modelable_introns.tsv'))
+non_modelable_introns |> write_tsv(file.path(output_folder, 'non_modelable_introns.tsv'))
+
+intron_gene_summary <- intron_summary |>
+  group_by(gene_id) |>
+  summarise(
+    num_introns_in_count_table = n(),
+    num_modelable_introns = sum(is_modelable),
+    num_intron_reads = sum(num_intron_reads),
+    .groups = "drop"
+  )
+
+exon_counts_df <- read_tsv(args$exon_counts_tsv, show_col_types = FALSE)
+
+sample_columns_exon <- setdiff(colnames(exon_counts_df), "gene_id")
+if (!setequal(sample_columns_exon, sample_columns)) {
+  stop("Sample columns differ between exon and intron count tables.")
+}
+
+exon_summary <- exon_counts_df |>
+  mutate(
+    num_exon_supporting_samples = rowSums(across(all_of(sample_columns)) >= min_count_exons),
+    num_exon_reads = rowSums(across(all_of(sample_columns)))
+  ) |>
+  select(-all_of(sample_columns))
+
+gene_summary <- all_genes_df |>
+  distinct(gene_id, .keep_all = TRUE) |>
+  left_join(
+    exon_summary |>
+      mutate(in_exon_count_table = TRUE),
+    by = "gene_id"
+  ) |>
+  left_join(intron_gene_summary, by = "gene_id") |>
+  mutate(
+    in_exon_count_table = replace_na(in_exon_count_table, FALSE),
+    num_exon_supporting_samples = replace_na(num_exon_supporting_samples, 0L),
+    num_exon_reads = replace_na(num_exon_reads, 0),
+    num_introns_in_count_table = replace_na(num_introns_in_count_table, 0L),
+    num_modelable_introns = replace_na(num_modelable_introns, 0L),
+    num_intron_reads = replace_na(num_intron_reads, 0),
+    is_modelable = (
+      num_exon_supporting_samples >= min_samples &
+        num_modelable_introns > 0
+    )
+  )
+
+
+
+
+
+
