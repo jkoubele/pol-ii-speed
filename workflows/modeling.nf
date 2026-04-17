@@ -235,6 +235,8 @@ workflow modeling_workflow {
         design_formula
         lrt_contrasts
         intron_specific_lfc
+        modelable_genes
+        modelable_introns
 
 
     main:
