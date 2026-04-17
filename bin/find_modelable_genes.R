@@ -4,32 +4,18 @@ library(argparse)
 library(tidyverse)
 
 
-if (interactive()) {
-  args <- list(
-    exon_counts_tsv = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/aggregated_counts/exon_counts.tsv",
-    intron_counts_tsv = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/aggregated_counts/intron_counts.tsv",
-    all_genes_csv = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/genomic_features/all_genes.csv",
-    protein_coding_genes_csv = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/genomic_features/protein_coding_genes.csv",
-    output_folder = "/cellfile/projects/pol_ii_speed/jkoubele/analysis/senescent_cells/results/preprocessing/modelable_genes/",
-    min_count_exons = 5,
-    min_count_introns = 5,
-    min_samples = 3
-  )
-} else {
-    parser <- ArgumentParser()
-    parser$add_argument("--exon_counts_tsv", required = TRUE)
-    parser$add_argument("--intron_counts_tsv", required = TRUE)
-    parser$add_argument("--all_genes_csv", required = TRUE)
-    parser$add_argument("--protein_coding_genes_csv", required = TRUE)
-    
-    parser$add_argument("--output_folder", default = '.')
-    
-    parser$add_argument("--min_count_exons", type = "integer", default = 5)
-    parser$add_argument("--min_count_introns", type = "integer", default = 5)
-    parser$add_argument("--min_samples", type = "integer", default = 3)
-    
-    args <- parser$parse_args()
-}
+parser <- ArgumentParser()
+parser$add_argument("--exon_counts_tsv", required = TRUE)
+parser$add_argument("--intron_counts_tsv", required = TRUE)
+parser$add_argument("--all_genes_csv", required = TRUE)
+
+parser$add_argument("--output_folder", default = '.')
+
+parser$add_argument("--min_count_exons", type = "integer", default = 5)
+parser$add_argument("--min_count_introns", type = "integer", default = 5)
+parser$add_argument("--min_samples", type = "integer", default = 3)
+
+args <- parser$parse_args()
 
 output_folder <- args$output_folder
 dir.create(output_folder, recursive = TRUE, showWarnings = FALSE)
@@ -39,7 +25,7 @@ min_count_introns <- args$min_count_introns
 min_samples <- args$min_samples
 
 intron_counts_df <- read_tsv(args$intron_counts_tsv, show_col_types = FALSE)
-all_genes_df <- read_csv(args$all_genes_csv)
+all_genes_df <- read_csv(args$all_genes_csv, show_col_types = FALSE)
 
 sample_columns <- setdiff(colnames(intron_counts_df), "intron_id")
 
@@ -56,8 +42,7 @@ modelable_introns <- intron_summary |>
   filter(is_modelable)
 
 non_modelable_introns <- intron_summary |>
-  filter(!is_modelable) |>
-  mutate(reason_for_exclusion = "low_intron_read_count")
+  filter(!is_modelable)
 
 modelable_introns |> write_tsv(file.path(output_folder, 'modelable_introns.tsv'))
 non_modelable_introns |> write_tsv(file.path(output_folder, 'non_modelable_introns.tsv'))
@@ -106,8 +91,15 @@ gene_summary <- all_genes_df |>
     )
   )
 
+modelable_genes <- gene_summary |>
+  filter(is_modelable)
 
+non_modelable_genes <- gene_summary |>
+  filter(!is_modelable)
 
+modelable_genes |>
+  write_tsv(file.path(output_folder, "modelable_genes.tsv"))
 
-
+non_modelable_genes |>
+  write_tsv(file.path(output_folder, "non_modelable_genes.tsv"))
 
