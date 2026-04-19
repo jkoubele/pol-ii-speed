@@ -53,19 +53,23 @@ process CreateDesignMatrices {
     """
 }
 
-process SplitGeneNames {
+process GetModeledGenes {
     input:
-    path gene_names
+    tuple(path(gene_names), path(modelable_genes), path(modelable_introns))
 
     output:
-    path("gene_names_chunk_*.csv"), emit: gene_names_chunks
+    path("gene_chunks/modeled_genes_chunk_*.tsv"), emit: gene_names_chunks
+    path("modeled_genes.tsv")
+    path("modeled_introns.tsv")
 
-//     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/gene_names_chunks", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/modeled_genes", mode: 'copy'
 
     script:
     """
-    split_gene_names.R \
+    get_modeled_genes.R \
     --input_gene_names $gene_names \
+    --modelable_genes $modelable_genes \
+    --modelable_introns $modelable_introns \
     --output_folder . \
     --chunk_size 100
     """
@@ -91,8 +95,6 @@ process FitModel {
     output:
     path("model_parameters*.csv"), optional: true, emit: model_parameters_chunk
     path("test_results*.csv"), optional: true, emit: test_results_chunk
-    path("logs/ignored_genes*.csv"),   emit: ignored_genes_logs
-    path("logs/ignored_introns*.csv"), emit: ignored_introns_logs
     tuple path("cache_for_regularization*.pt"), val(chunk_name), optional: true, emit: cache_for_regularization
 
 //     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
@@ -121,15 +123,10 @@ process MergeModelResultChunks {
     input:
     path model_parameters_chunks
     path test_results_chunks
-    path ignored_genes_logs
-    path ignored_introns_logs
 
     output:
     path("test_results_before_regularization.csv"), emit: test_results_before_regularization
     path("model_parameters.csv"), emit: model_parameters
-    path("ignored_genes.csv")
-    path("ignored_introns.csv")
-
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results",
      mode: 'copy',
      saveAs: { filename ->
@@ -235,8 +232,8 @@ workflow modeling_workflow {
         design_formula
         lrt_contrasts
         intron_specific_lfc
-        modelable_genes
-        modelable_introns
+        modelable_genes_input
+        modelable_introns_input
 
 
     main:
@@ -253,11 +250,15 @@ workflow modeling_workflow {
             design_formula,
             design_metadata.lrt_contrasts_json
         )
+        get_modeled_genes_input = gene_names_file_input
+        .combine(modelable_genes_input)
+        .combine(modelable_introns_input)
 
-        gene_names_split = SplitGeneNames(gene_names_file_input)
+        get_modeled_genes_input | view()
+        modeled_genes = GetModeledGenes(get_modeled_genes_input)
 
 
-        def model_input = gene_names_split.gene_names_chunks
+        def model_input = modeled_genes.gene_names_chunks
             .flatten()
             .map{ file -> tuple(file, file.baseName)}
             .combine(design_matrices_data.design_matrix)
@@ -276,14 +277,10 @@ workflow modeling_workflow {
 
         def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.filter { it != null }.collect()
         def collected_test_results_chunks  = fit_model_output.test_results_chunk.filter { it != null }.collect()
-        def collected_ignored_genes_logs   = fit_model_output.ignored_genes_logs.collect()
-        def collected_ignored_introns_logs = fit_model_output.ignored_introns_logs.collect()
 
         def model_result_merged = MergeModelResultChunks(
             collected_model_parameters_chunks,
-            collected_test_results_chunks,
-            collected_ignored_genes_logs,
-            collected_ignored_introns_logs
+            collected_test_results_chunks
         )
 
         def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)

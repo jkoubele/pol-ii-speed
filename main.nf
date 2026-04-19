@@ -51,7 +51,7 @@ workflow {
 
         if (params.stage == 'model') {
             def preprocessing_output_subfolder = "preprocessing"
-            gene_names_file        = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/gene_names/protein_coding_genes.csv"))
+            gene_names_file        = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/genomic_features/protein_coding_genes.csv"))
             exon_counts            = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/exon_counts.tsv"))
             intron_counts          = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/intron_counts.tsv"))
             library_size_factors   = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/library_size_factors.tsv"))

@@ -36,7 +36,6 @@ model_parameters_merged_df <- sort(model_parameters_files) |>
 
 write_csv(model_parameters_merged_df, file.path(output_folder, 'model_parameters.csv'))
 
-
 test_results_files <- list.files(path = input_folder,
                                  pattern = "^test_results.*\\.csv$",
                                  full.names = TRUE)
@@ -51,30 +50,3 @@ test_results_merged_df <- sort(test_results_files) |>
   list_rbind()
 
 write_csv(test_results_merged_df, file.path(output_folder, 'test_results_before_regularization.csv'))
-
-
-ignored_introns_files <- sort(list.files(path = input_folder,
-                                         pattern = "^ignored_introns.*\\.csv$",
-                                         full.names = TRUE))
-
-if (length(ignored_introns_files) > 0) {
-  ignored_introns_files |>
-    map(~read_csv(.x, show_col_types = FALSE)) |>
-    list_rbind() |>
-    write_csv(file.path(output_folder, "ignored_introns.csv"))
-} else {
-  message("No ignored_introns*.csv files found in input folder: ", input_folder)
-}
-
-ignored_genes_files <- sort(list.files(path = input_folder,
-                                       pattern = "^ignored_genes.*\\.csv$",
-                                       full.names = TRUE))
-
-if (length(ignored_genes_files) > 0) {
-  ignored_genes_files |>
-    map(~read_csv(.x, show_col_types = FALSE)) |>
-    list_rbind() |>
-    write_csv(file.path(output_folder, "ignored_genes.csv"))
-} else {
-  message("No ignored_genes*.csv files found in input folder: ", input_folder)
-}

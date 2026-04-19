@@ -65,7 +65,7 @@ def load_gene_data_list(gene_names_file: Path,
                         log_output_folder: Path,
                         log_output_name_suffix: str = '') -> list[GeneData]:
     log_output_folder.mkdir(exist_ok=True, parents=True)
-    gene_names_df = pd.read_csv(gene_names_file)
+    gene_names_df = pd.read_csv(gene_names_file, sep='\t')
 
     exon_counts_df = pd.read_csv(exon_counts_file, sep='\t').set_index('gene_id')
     exon_counts_df = exon_counts_df[sample_names]

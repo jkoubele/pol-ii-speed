@@ -511,7 +511,7 @@ workflow preprocessing_workflow {
        .combine(data_aggregation.intron_counts)
        .combine(genomic_features.all_genes)
 
-       def modelable_genes = FindModelableGenes(find_modelable_genes_input)
+       def modelable_genes_output = FindModelableGenes(find_modelable_genes_input)
 
     emit:
         gene_names_file          = genomic_features.protein_coding_gene_names
@@ -520,7 +520,7 @@ workflow preprocessing_workflow {
         library_size_factors     = data_aggregation.library_size_factors
         isoform_length_factors   = data_aggregation.isoform_length_factors
         coverage_files           = rescaled_coverage_combined
-        modelable_genes          = modelable_genes.modelable_genes
-        modelable_introns        = modelable_genes.modelable_introns
+        modelable_genes          = modelable_genes_output.modelable_genes
+        modelable_introns        = modelable_genes_output.modelable_introns
 
 }
