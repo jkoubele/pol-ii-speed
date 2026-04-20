@@ -3,22 +3,14 @@
 library(argparse)
 library(tidyverse)
 
-if (interactive()){
-  args = list(input_gene_names = '/home/jakub/Desktop/c_elegans_test/results/preprocessing/genomic_features/protein_coding_genes.csv',
-              output_folder='/home/jakub/Desktop/c_elegans_test/results/test_modeled_genes',
-              modelable_genes='/home/jakub/Desktop/c_elegans_test/results/preprocessing/modelable_genes/modelable_genes.tsv',
-              modelable_introns='/home/jakub/Desktop/c_elegans_test/results/preprocessing/modelable_genes/modelable_introns.tsv',
-              chunk_size=100)
-  
-} else {
-  parser <- ArgumentParser()
-  parser$add_argument("--input_gene_names", required = TRUE, help = "Path to input CSV file with gene names.")
-  parser$add_argument("--modelable_genes", required = TRUE, help = "Path to TSV file with modelable genes.")
-  parser$add_argument("--modelable_introns", required = TRUE, help = "Path to TSV file with modelable introns.")
-  parser$add_argument("--output_folder", required = TRUE, help = "Directory to write output chunked CSV files.")
-  parser$add_argument("--chunk_size", type = "integer", default = 100, help = "Number of rows per chunk (default: 100).")
-  args <- parser$parse_args()
-}
+
+parser <- ArgumentParser()
+parser$add_argument("--input_gene_names", required = TRUE, help = "Path to input CSV file with gene names.")
+parser$add_argument("--modelable_genes", required = TRUE, help = "Path to TSV file with modelable genes.")
+parser$add_argument("--modelable_introns", required = TRUE, help = "Path to TSV file with modelable introns.")
+parser$add_argument("--output_folder", required = TRUE, help = "Directory to write output chunked CSV files.")
+parser$add_argument("--chunk_size", type = "integer", default = 100, help = "Number of rows per chunk (default: 100).")
+args <- parser$parse_args()
 
 
 output_folder <- args$output_folder
@@ -49,7 +41,7 @@ modeled_genes |>
 modeled_introns |>
   write_tsv(file.path(output_folder, "modeled_introns.tsv"))
 
- 
+
 n_chunks <- ceiling(nrow(modeled_genes) / chunk_size)
 pad_width <- nchar(as.character(n_chunks))  # Determine left-padding
 
@@ -64,4 +56,3 @@ for (i in seq_len(n_chunks)) {
 
   write_tsv(chunk, output_path)
 }
-
