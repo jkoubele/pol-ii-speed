@@ -102,13 +102,30 @@ class Pol2Model(nn.Module):
                 int] = None if not intron_specific_lfc or self.lrt_specification.tested_parameter == TestableParameters.ALPHA else self.intron_names.index(
                 self.lrt_specification.tested_intron)
 
-    def initialize_intercepts(self, gene_data: GeneData, library_sizes: torch.Tensor) -> None:
+    def initialize_intercepts(self,
+                              gene_data: GeneData,
+                              library_sizes: torch.Tensor,
+                              pi_eps: float = 0.05,
+                              num_pi_grid_points: int = 20) -> None:
         with torch.no_grad():
             intercept_exon_scalar = torch.log(gene_data.exon_reads.mean() / library_sizes.mean())
             self.intercept_exon.data[:] = intercept_exon_scalar  # preserve shape [1]
 
             intercept_intron_vector = torch.log(gene_data.intron_reads.mean(dim=0) / library_sizes.mean() / 2)
             self.intercept_intron.data.copy_(intercept_intron_vector)
+
+            aggregated_coverage = gene_data.coverage.sum(dim=0)
+            pi_grid = torch.linspace(
+                pi_eps,
+                1 - pi_eps,
+                num_pi_grid_points,
+                device=aggregated_coverage.device,
+                dtype=aggregated_coverage.dtype,
+            )
+            coverage_loss = CoverageLoss(num_position_coverage=aggregated_coverage.shape[1])
+            coverage_loss_grid = coverage_loss.loss_for_pi_grid(pi_grid, aggregated_coverage)
+            best_pi = pi_grid[coverage_loss_grid.argmin(dim=0)]
+            self.theta.data.copy_(torch.logit(best_pi, eps=pi_eps))
 
     def forward(self,
                 design_matrix: torch.Tensor,
@@ -206,6 +223,21 @@ class CoverageLoss(nn.Module):
     def forward(self, pi, coverage):
         loss_per_location = -torch.log(1 + pi.unsqueeze(2) * self.location_term)
         return torch.sum(loss_per_location * coverage)
+
+    def loss_for_pi_grid(self, candidate_pi: torch.Tensor, aggregated_coverage: torch.Tensor) -> torch.Tensor:
+        """
+        Compute coverage loss for a grid of candidate pi values.
+        Args:
+            candidate_pi: Tensor of shape (k,), candidate values of pi.
+            aggregated_coverage: Tensor of shape (i, b), coverage summed over samples.
+        Returns:
+            Tensor of shape (k, i) containing the total loss for each candidate pi
+            and each intron.
+        """
+        loss_terms = -torch.log(
+            1 + candidate_pi[:, None] * self.location_term[None, :]
+        )  # shape (k, b)
+        return torch.einsum("kb,ib->ki", loss_terms, aggregated_coverage)
 
 
 class Pol2TotalLoss(nn.Module):
