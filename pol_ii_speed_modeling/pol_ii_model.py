@@ -240,12 +240,6 @@ class CoverageLoss(nn.Module):
         return torch.einsum("kb,ib->ki", loss_terms, aggregated_coverage)
 
 
-def hello_world(x: str):
-    """
-    """
-    pass
-
-
 class Pol2TotalLoss(nn.Module):
     def __init__(self, num_position_coverage: int = 100):
         super().__init__()
