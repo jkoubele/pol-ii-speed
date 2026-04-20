@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument('--regularization_coefficients',
                         type=Path,
                         required=True,
-                        help='Path to the CSV file with regularization coefficients.')
+                        help='Path to the TSV file with regularization coefficients.')
     parser.add_argument('--output_folder',
                         type=Path,
                         default=Path('.'),
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     output_folder = args.output_folder
     output_folder.mkdir(exist_ok=True, parents=True)
 
-    regularization_coefficients_df = pd.read_csv(args.regularization_coefficients)
+    regularization_coefficients_df = pd.read_csv(args.regularization_coefficients, sep='\t')
 
     device = 'cpu'
     cache_for_regularization = torch.load(args.cache_for_regularization,
@@ -50,5 +50,6 @@ if __name__ == "__main__":
                                                          tqdm(cache_for_regularization.training_input_per_gene)]
     all_regularized_model_param_df = pd.concat(regularized_model_params_list).reset_index(drop=True)
 
-    all_regularized_model_param_df.to_csv(output_folder / f"regularized_model_parameters{args.output_name_suffix}.csv",
+    all_regularized_model_param_df.to_csv(output_folder / f"regularized_model_parameters{args.output_name_suffix}.tsv",
+                                          sep='\t',
                                           index=False)

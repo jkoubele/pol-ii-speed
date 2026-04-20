@@ -22,7 +22,7 @@ if (!dir.exists(output_folder)) {
 }
 
 model_parameters_files <- list.files(path = input_folder,
-                                     pattern = "^model_parameters.*\\.csv$",
+                                     pattern = "^model_parameters.*\\.tsv$",
                                      full.names = TRUE)
 
 if (length(model_parameters_files) == 0) {
