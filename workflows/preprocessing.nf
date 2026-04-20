@@ -44,7 +44,7 @@ process ExtractGenomicFeatures {
         path('introns.gtf'), emit: introns_gtf_file
         path('constitutive_exons.gtf'), emit: constitutive_exons_gtf_file
         path("protein_coding_genes.csv"), emit: protein_coding_gene_names
-        path("all_genes.csv")
+        path("all_genes.csv"), emit: all_genes
 
     publishDir "${params.outdir}/${preprocessing_output_subfolder}/genomic_features", mode: 'copy'
 
@@ -366,6 +366,27 @@ process AggregateReadCounts {
     """
 }
 
+process FindModelableGenes {
+    input:
+        tuple path(exon_counts_tsv), path(intron_counts_tsv), path(all_genes_csv)
+
+    output:
+    path("modelable_genes.tsv"), emit: modelable_genes
+    path("modelable_introns.tsv"), emit: modelable_introns
+    tuple path("non_modelable_genes.tsv"), path("non_modelable_introns.tsv")
+
+    publishDir "${params.outdir}/${preprocessing_output_subfolder}/modelable_genes", mode: 'copy'
+
+    script:
+    """
+    find_modelable_genes.R \
+        --exon_counts_tsv $exon_counts_tsv \
+        --intron_counts_tsv $intron_counts_tsv \
+        --all_genes_csv $all_genes_csv \
+        --output_folder .
+    """
+}
+
 
 workflow preprocessing_workflow {
     take:
@@ -486,6 +507,12 @@ workflow preprocessing_workflow {
        .combine(ignore_tx_version_channel)
        .combine(genomic_features.protein_coding_gene_names) | AggregateReadCounts
 
+       def find_modelable_genes_input =  data_aggregation.exon_counts
+       .combine(data_aggregation.intron_counts)
+       .combine(genomic_features.all_genes)
+
+       def modelable_genes_output = FindModelableGenes(find_modelable_genes_input)
+
     emit:
         gene_names_file          = genomic_features.protein_coding_gene_names
         exon_counts              = data_aggregation.exon_counts
@@ -493,5 +520,7 @@ workflow preprocessing_workflow {
         library_size_factors     = data_aggregation.library_size_factors
         isoform_length_factors   = data_aggregation.isoform_length_factors
         coverage_files           = rescaled_coverage_combined
+        modelable_genes          = modelable_genes_output.modelable_genes
+        modelable_introns        = modelable_genes_output.modelable_introns
 
 }

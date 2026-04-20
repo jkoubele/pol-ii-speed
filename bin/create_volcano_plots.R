@@ -7,12 +7,12 @@ library(argparse)
 parser <- ArgumentParser()
 parser$add_argument("--test_results",
                     required = TRUE,
-                    help = "Path to CSV file with LRTs results.")
+                    help = "Path to the TSV file with LRTs results.")
 parser$add_argument("--output_folder", default = '.')
 
 args <- parser$parse_args()
 
-test_results <- read_csv(args$test_results)
+test_results <- read_tsv(args$test_results)
 
 min_p_value <- 1e-20
 fdr_threshold <- 0.05

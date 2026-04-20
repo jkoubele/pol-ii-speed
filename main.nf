@@ -51,12 +51,14 @@ workflow {
 
         if (params.stage == 'model') {
             def preprocessing_output_subfolder = "preprocessing"
-            gene_names_file        = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/gene_names/protein_coding_genes.csv"))
+            gene_names_file        = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/genomic_features/protein_coding_genes.csv"))
             exon_counts            = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/exon_counts.tsv"))
             intron_counts          = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/intron_counts.tsv"))
             library_size_factors   = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/library_size_factors.tsv"))
             isoform_length_factors = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/isoform_length_factors.tsv"))
             coverage_files         = Channel.fromPath("${params.outdir}/${preprocessing_output_subfolder}/rescaled_coverage/*.parquet").collect()
+            modelable_genes        = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/modelable_genes/modelable_genes.tsv"))
+            modelable_introns      = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/modelable_genes/modelable_introns.tsv"))
         }
 
         if (params.stage == 'all') {
@@ -67,6 +69,9 @@ workflow {
             library_size_factors   = preproc_out.library_size_factors
             isoform_length_factors = preproc_out.isoform_length_factors
             coverage_files         = preproc_out.coverage_files
+            modelable_genes        = preproc_out.modelable_genes
+            modelable_introns      = preproc_out.modelable_introns
+
         }
 
         if (params.custom_gene_list) {
@@ -87,7 +92,9 @@ workflow {
             coverage_files,
             params.design_formula,
             lrt_contrasts,
-            params.intron_specific_lfc
+            params.intron_specific_lfc,
+            modelable_genes,
+            modelable_introns
         )
     }
 }
