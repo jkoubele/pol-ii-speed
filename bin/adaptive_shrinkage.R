@@ -8,14 +8,14 @@ library(argparse)
 parser <- ArgumentParser()
 parser$add_argument("--model_parameters",
                     required = TRUE,
-                    help = "Path to CSV file with model parameters.")
+                    help = "Path to TSV file with model parameters.")
 parser$add_argument("--output_folder", default = ".",
-                    help = "Where to write the output CSV with regularization coefficients.")
+                    help = "Where to write the output TSV with regularization coefficients.")
 
 
 args <- parser$parse_args()
 
-model_parameters <- read.csv(args$model_parameters)
+model_parameters <- read_tsv(args$model_parameters)
 
 regularization_coefficients_df <- tibble(
   parameter_type = character(),
@@ -56,5 +56,5 @@ for (parameter in c('beta', 'gamma')) {
   }
 }
 
-write_csv(regularization_coefficients_df, file.path(args$output_folder, "regularization_coefficients.csv"))
+write_tsv(regularization_coefficients_df, file.path(args$output_folder, "regularization_coefficients.tsv"))
 

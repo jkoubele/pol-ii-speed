@@ -41,7 +41,7 @@ design_matrix_df <- design_matrix |>
   as.data.frame() |>
   rownames_to_column("sample")
 
-write_csv(design_matrix_df, file.path(output_folder, "design_matrix.csv"))
+write_tsv(design_matrix_df, file.path(output_folder, "design_matrix.tsv"))
 
 lrt_metadata <- tibble(
   test_id = character(),
@@ -71,7 +71,7 @@ for (i in seq_along(lrt_contrasts)) {
   test_id <- paste0("lrt_", i)
   reduced_matrix_output_path <- file.path(
     output_folder_reduced_matrices,
-    paste0(test_id, ".csv")
+    paste0(test_id, ".tsv")
   )
 
   lfc_column_positive <- ""
@@ -100,7 +100,7 @@ for (i in seq_along(lrt_contrasts)) {
     reduced_design_matrix_df <- reduced_design_matrix |>
       as.data.frame() |>
       rownames_to_column("sample")
-    write_csv(reduced_design_matrix_df, reduced_matrix_output_path)
+    write_tsv(reduced_design_matrix_df, reduced_matrix_output_path)
 
     group_1 <- ""
     group_2 <- ""
@@ -186,7 +186,7 @@ for (i in seq_along(lrt_contrasts)) {
     reduced_design_matrix_df <- reduced_design_matrix |>
       as.data.frame() |>
       rownames_to_column("sample")
-    write_csv(reduced_design_matrix_df, reduced_matrix_output_path)
+    write_tsv(reduced_design_matrix_df, reduced_matrix_output_path)
   }
 
   lrt_metadata <- add_row(
@@ -203,4 +203,4 @@ for (i in seq_along(lrt_contrasts)) {
 
 }
 
-write_csv(lrt_metadata, file.path(output_folder, "lrt_metadata.csv"))
+write_tsv(lrt_metadata, file.path(output_folder, "lrt_metadata.tsv"))

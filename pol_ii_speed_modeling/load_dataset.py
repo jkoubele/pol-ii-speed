@@ -1,5 +1,3 @@
-from collections import defaultdict
-from enum import StrEnum
 from pathlib import Path
 
 import numpy as np
@@ -9,25 +7,12 @@ from tqdm import tqdm
 
 from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata
 
-MIN_SAMPLES_WITH_NONZERO_READ_COUNT = 3
-
-
-class IgnoringGeneReasons(StrEnum):
-    NOT_IN_EXON_READS = 'Gene not found in the table with exonic reads.'
-    NOT_ENOUGH_EXON_READS = f'Gene has less than {MIN_SAMPLES_WITH_NONZERO_READ_COUNT} samples with non-zero read counts.'
-    NO_INTRONS_IN_TABLE = 'Gene has no introns in the intronic count matrix.'
-    NO_INTRONS_AFTER_FILTERING = 'Gene has no introns that would have enough non-zero read counts.'
-
-
-class IgnoringIntronReasons(StrEnum):
-    NOT_ENOUGH_INTRON_READS = f'Intron has less than {MIN_SAMPLES_WITH_NONZERO_READ_COUNT} samples with non-zero read count.'
-
 
 def load_dataset_metadata(design_matrix_file: Path,
                           library_size_factors_file: Path,
                           lrt_metadata_file: Path,
                           reduced_matrices_folder: Path) -> DatasetMetadata:
-    design_matrix_df = pd.read_csv(design_matrix_file)
+    design_matrix_df = pd.read_csv(design_matrix_file, sep='\t')
     library_size_factors_df = pd.read_csv(library_size_factors_file, sep='\t')
 
     design_matrix_df = design_matrix_df.merge(library_size_factors_df,
@@ -37,10 +22,10 @@ def load_dataset_metadata(design_matrix_file: Path,
                                  dtype=torch.float32)
     design_matrix_df = design_matrix_df.set_index('sample')
 
-    lrt_metadata = pd.read_csv(lrt_metadata_file)
+    lrt_metadata = pd.read_csv(lrt_metadata_file, sep='\t')
     reduced_matrices: dict[str, torch.Tensor] = {}
     for test_id in lrt_metadata['test_id']:
-        reduced_matrix_df = pd.read_csv(reduced_matrices_folder / f"{test_id}.csv").set_index('sample')
+        reduced_matrix_df = pd.read_csv(reduced_matrices_folder / f"{test_id}.tsv", sep='\t').set_index('sample')
         if not all(design_matrix_df.index == reduced_matrix_df.index):
             raise ValueError(
                 f"Reduced matrix index {reduced_matrix_df.index} does not equal to design matrix index {design_matrix_df.index}.")
@@ -56,17 +41,14 @@ def load_dataset_metadata(design_matrix_file: Path,
     return dataset_metadata
 
 
-def load_gene_data_list(gene_names_file: Path,
+def load_gene_data_list(modeled_genes_file: Path,
+                        modeled_introns_file: Path,
                         exon_counts_file: Path,
                         intron_counts_file: Path,
                         isoform_length_factors_file: Path,
                         coverage_folder: Path,
-                        sample_names: list[str],
-                        log_output_folder: Path,
-                        log_output_name_suffix: str = '') -> list[GeneData]:
-    log_output_folder.mkdir(exist_ok=True, parents=True)
-    gene_names_df = pd.read_csv(gene_names_file, sep='\t')
-
+                        sample_names: list[str]) -> list[GeneData]:
+    modeled_genes_df = pd.read_csv(modeled_genes_file, sep='\t')
     exon_counts_df = pd.read_csv(exon_counts_file, sep='\t').set_index('gene_id')
     exon_counts_df = exon_counts_df[sample_names]
 
@@ -76,9 +58,14 @@ def load_gene_data_list(gene_names_file: Path,
     isoform_length_factors_df = pd.read_csv(isoform_length_factors_file, sep='\t').set_index('gene_id')
     isoform_length_factors_df = isoform_length_factors_df[sample_names]
 
-    gene_to_intron_names = defaultdict(list)
-    for intron_name in intron_counts_df.index:
-        gene_to_intron_names[intron_name.rsplit('_', maxsplit=1)[0]].append(intron_name)
+    modeled_introns_df = pd.read_csv(modeled_introns_file, sep='\t')
+
+    gene_to_introns = (
+        modeled_introns_df
+        .groupby("gene_id")["intron_id"]
+        .agg(list)
+        .to_dict()
+    )
 
     coverage_df_by_sample: dict[str, pd.DataFrame] = {}
     for sample_name in tqdm(sample_names, desc='Loading coverage data'):
@@ -86,110 +73,38 @@ def load_gene_data_list(gene_names_file: Path,
         coverage_df = coverage_df.set_index('intron_name')
         coverage_df_by_sample[sample_name] = coverage_df
 
-    # Check for missing samples in count matrices    
-    missing_exon_samples = set(sample_names) - set(exon_counts_df.columns)
-    if missing_exon_samples:
-        raise ValueError(f"The following samples are missing in exon_counts_df: {sorted(missing_exon_samples)}")
-    missing_intron_samples = set(sample_names) - set(intron_counts_df.columns)
-    if missing_intron_samples:
-        raise ValueError(f"The following samples are missing in intron_counts_df: {sorted(missing_intron_samples)}")
-
     gene_data_list: list[GeneData] = []
 
-    ignored_genes: dict[str, str] = {}
-    ignored_introns: dict[str, str] = {}
-
-    for gene_id in tqdm(gene_names_df['gene_id'].unique(), desc='Preparing gene data'):
-        if gene_id not in exon_counts_df.index:
-            ignored_genes[gene_id] = IgnoringGeneReasons.NOT_IN_EXON_READS.value
-            continue
-
+    for gene_id in tqdm(modeled_genes_df['gene_id'], desc='Preparing gene data'):
         exon_row = exon_counts_df.loc[gene_id]
-        if (exon_row > 0).sum() < MIN_SAMPLES_WITH_NONZERO_READ_COUNT:
-            ignored_genes[gene_id] = IgnoringGeneReasons.NOT_ENOUGH_EXON_READS.value
-            continue
 
-        gene_intron_names = gene_to_intron_names[gene_id]
-        if not gene_intron_names:
-            ignored_genes[gene_id] = IgnoringGeneReasons.NO_INTRONS_IN_TABLE.value
-            continue
-
-        introns_to_keep: list[str] = []
-        for intron_name in gene_intron_names:
-            if (intron_counts_df.loc[intron_name] > 0).sum() < MIN_SAMPLES_WITH_NONZERO_READ_COUNT:
-                ignored_introns[intron_name] = IgnoringIntronReasons.NOT_ENOUGH_INTRON_READS.value
-                continue
-            else:
-                introns_to_keep.append(intron_name)
-
-        if not introns_to_keep:
-            ignored_genes[gene_id] = IgnoringGeneReasons.NO_INTRONS_AFTER_FILTERING.value
-            continue
-
-        # Sort by intron position in the gene
-        introns_to_keep = sorted(introns_to_keep, key=lambda x: int(x.rsplit('_', maxsplit=1)[1]))
+        # Sort introns by position in the gene
+        gene_intron_names = sorted(
+            gene_to_introns[gene_id],
+            key=lambda x: int(x.rsplit('_', maxsplit=1)[1]),
+        )
 
         exon_reads = torch.tensor(exon_row.values, dtype=torch.float32)
-        intron_reads = torch.tensor(intron_counts_df.loc[introns_to_keep].values, dtype=torch.float32).T
+        intron_reads = torch.tensor(intron_counts_df.loc[gene_intron_names].values, dtype=torch.float32).T
 
-        coverage_of_bases = torch.tensor(np.stack([
-            np.stack([coverage_df_by_sample[sample].loc[intron].values for intron in introns_to_keep])
+        coverage = torch.tensor(np.stack([
+            np.stack([coverage_df_by_sample[sample].loc[intron].values for intron in gene_intron_names])
             for sample in sample_names
         ]), dtype=torch.float32)
 
-        coverage_sum = coverage_of_bases.sum(axis=2).unsqueeze(2)
-
-        coverage_density = torch.where(
-            coverage_sum > 0,
-            coverage_of_bases / coverage_sum,
-            torch.zeros_like(coverage_of_bases)
-        )
-
-        read_coverage = coverage_density * intron_reads.unsqueeze(2)
+        if not torch.allclose(coverage.sum(axis=2), intron_reads):
+            raise ValueError(f'Intron coverage for gene {gene_id} does not sum up to its intron read counts.')
 
         isoform_length_factors = torch.tensor(isoform_length_factors_df.loc[gene_id].values,
                                               dtype=torch.float32)
         isoform_length_offset = torch.log(isoform_length_factors)
 
         gene_data = GeneData(gene_name=gene_id,
-                             intron_names=introns_to_keep,
+                             intron_names=gene_intron_names,
                              exon_reads=exon_reads,
                              intron_reads=intron_reads,
-                             coverage=read_coverage,
+                             coverage=coverage,
                              isoform_length_offset=isoform_length_offset)
         gene_data_list.append(gene_data)
 
-    ignored_genes_df = pd.DataFrame(data={'gene': list(ignored_genes.keys()),
-                                          'reason': list(ignored_genes.values())})
-    ignored_introns_df = pd.DataFrame(data={'intron': list(ignored_introns.keys()),
-                                            'reason': list(ignored_introns.values())})
-    ignored_genes_df.to_csv(log_output_folder / f'ignored_genes{log_output_name_suffix}.csv', index=False)
-    ignored_introns_df.to_csv(log_output_folder / f'ignored_introns{log_output_name_suffix}.csv', index=False)
-
     return gene_data_list
-
-
-def load_dataset_from_results_folder(results_folder: Path,
-                                     log_output_folder: Path,
-                                     gene_names_file_name='protein_coding_genes.csv') \
-        -> tuple[DatasetMetadata, list[GeneData]]:
-    design_matrix_file = results_folder / 'design_matrix' / 'design_matrix.csv'
-    library_size_factors_file = results_folder / 'aggregated_counts' / 'library_size_factors.tsv'
-
-    dataset_metadata = load_dataset_metadata(design_matrix_file, library_size_factors_file)
-    gene_names_file = results_folder / 'gene_names' / gene_names_file_name
-    exon_counts_file = results_folder / 'aggregated_counts' / 'exon_counts.tsv'
-    intron_counts_file = results_folder / 'aggregated_counts' / 'intron_counts.tsv'
-    isoform_length_factors_file = results_folder / 'aggregated_counts' / 'isoform_length_factors.tsv'
-    coverage_folder = results_folder / 'rescaled_coverage'
-
-    gene_data_list = load_gene_data_list(gene_names_file=gene_names_file,
-                                         exon_counts_file=exon_counts_file,
-                                         intron_counts_file=intron_counts_file,
-                                         isoform_length_factors_file=isoform_length_factors_file,
-                                         coverage_folder=coverage_folder,
-                                         sample_names=dataset_metadata.sample_names,
-                                         log_output_folder=log_output_folder
-                                         )
-
-    return dataset_metadata, gene_data_list

@@ -38,8 +38,8 @@ process CreateDesignMatrices {
     path lrt_contrasts_json
 
     output:
-    path("design_matrix.csv"), emit: design_matrix
-    path("lrt_metadata.csv"), emit: lrt_metadata
+    path("design_matrix.tsv"), emit: design_matrix
+    path("lrt_metadata.tsv"), emit: lrt_metadata
     path("reduced_design_matrices"), emit: reduced_design_matrices
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/design_matrices", mode: 'copy'
@@ -60,7 +60,7 @@ process GetModeledGenes {
     output:
     path("gene_chunks/modeled_genes_chunk_*.tsv"), emit: gene_names_chunks
     path("modeled_genes.tsv")
-    path("modeled_introns.tsv")
+    path("modeled_introns.tsv"), emit: modeled_introns
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/modeled_genes", mode: 'copy'
 
@@ -79,8 +79,9 @@ process GetModeledGenes {
 process FitModel {
     input:
     tuple (
-        path(gene_names),
+        path(modeled_genes_chunk),
         val(chunk_name),
+        path(modeled_introns),
         path(design_matrix),
         path(lrt_metadata),
         path(reduced_matrices_folder),
@@ -93,9 +94,9 @@ process FitModel {
     )
 
     output:
-    path("model_parameters*.csv"), optional: true, emit: model_parameters_chunk
-    path("test_results*.csv"), optional: true, emit: test_results_chunk
-    tuple path("cache_for_regularization*.pt"), val(chunk_name), optional: true, emit: cache_for_regularization
+    path("model_parameters*.tsv"), emit: model_parameters_chunk
+    path("test_results*.tsv"), emit: test_results_chunk
+    tuple path("cache_for_regularization*.pt"), val(chunk_name), emit: cache_for_regularization
 
 //     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/model_results_chunks/${chunk_name}", mode: 'copy'
 
@@ -103,8 +104,9 @@ process FitModel {
     """
     export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
     fit_model.py \
+    --modeled_genes $modeled_genes_chunk \
+    --modeled_introns $modeled_introns \
     --design_matrix $design_matrix \
-    --gene_names $gene_names \
     --exon_counts $exon_counts_matrix \
     --intron_counts $intron_counts_matrix \
     --library_size_factors $library_size_factors \
@@ -125,12 +127,12 @@ process MergeModelResultChunks {
     path test_results_chunks
 
     output:
-    path("test_results_before_regularization.csv"), emit: test_results_before_regularization
-    path("model_parameters.csv"), emit: model_parameters
+    path("test_results_before_regularization.tsv"), emit: test_results_before_regularization
+    path("model_parameters.tsv"), emit: model_parameters
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results",
      mode: 'copy',
      saveAs: { filename ->
-            if( filename == 'test_results_before_regularization.csv' ) null // Not publishing intermediate test results
+            if( filename == 'test_results_before_regularization.tsv' ) null // Not publishing intermediate test results
             else filename
         }
 
@@ -149,7 +151,7 @@ process AdaptiveShrinkage {
     path model_parameters
 
     output:
-    path("regularization_coefficients.csv"), emit: regularization_coefficients
+    path("regularization_coefficients.tsv"), emit: regularization_coefficients
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/adaptive_shrinkage", mode: 'copy'
 
@@ -169,7 +171,7 @@ process FitRegularizedModel {
     )
 
     output:
-    path("regularized_model_parameters*.csv"), emit: regularized_model_parameters_chunk
+    path("regularized_model_parameters*.tsv"), emit: regularized_model_parameters_chunk
 
 //     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/processing_chunks/regularized_model_results_chunks/${chunk_name}", mode: 'copy'
 
@@ -189,8 +191,8 @@ process AddRegularizationToTestResults {
     path regularized_model_parameters_chunks
 
     output:
-    path("test_results.csv"), emit: test_results
-    path("regularized_model_parameters.csv")
+    path("test_results.tsv"), emit: test_results
+    path("regularized_model_parameters.tsv")
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results", mode: 'copy'
 
@@ -254,13 +256,12 @@ workflow modeling_workflow {
         .combine(modelable_genes_input)
         .combine(modelable_introns_input)
 
-        get_modeled_genes_input | view()
-        modeled_genes = GetModeledGenes(get_modeled_genes_input)
-
+        def modeled_genes = GetModeledGenes(get_modeled_genes_input)
 
         def model_input = modeled_genes.gene_names_chunks
             .flatten()
             .map{ file -> tuple(file, file.baseName)}
+            .combine(modeled_genes.modeled_introns)
             .combine(design_matrices_data.design_matrix)
             .combine(design_matrices_data.lrt_metadata)
             .combine(design_matrices_data.reduced_design_matrices)
@@ -274,29 +275,29 @@ workflow modeling_workflow {
             .combine(Channel.value(intron_specific_lfc))
 
         def fit_model_output = FitModel(model_input)
-
-        def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.filter { it != null }.collect()
-        def collected_test_results_chunks  = fit_model_output.test_results_chunk.filter { it != null }.collect()
-
-        def model_result_merged = MergeModelResultChunks(
-            collected_model_parameters_chunks,
-            collected_test_results_chunks
-        )
-
-        def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
-
-        def regularized_model_input = fit_model_output.cache_for_regularization
-            .combine(adaptive_shrinkage_out.regularization_coefficients)
-
-        def fit_regularized_model_output = FitRegularizedModel(regularized_model_input)
-
-        def collected_regularized_model_parameters_chunk = fit_regularized_model_output.regularized_model_parameters_chunk.collect()
-
-        def add_regularization_output = AddRegularizationToTestResults(
-            model_result_merged.test_results_before_regularization,
-            collected_regularized_model_parameters_chunk
-        )
-
-        CreateVolcanoPlots(add_regularization_output.test_results)
+//
+//         def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.filter { it != null }.collect()
+//         def collected_test_results_chunks  = fit_model_output.test_results_chunk.filter { it != null }.collect()
+//
+//         def model_result_merged = MergeModelResultChunks(
+//             collected_model_parameters_chunks,
+//             collected_test_results_chunks
+//         )
+//
+//         def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
+//
+//         def regularized_model_input = fit_model_output.cache_for_regularization
+//             .combine(adaptive_shrinkage_out.regularization_coefficients)
+//
+//         def fit_regularized_model_output = FitRegularizedModel(regularized_model_input)
+//
+//         def collected_regularized_model_parameters_chunk = fit_regularized_model_output.regularized_model_parameters_chunk.collect()
+//
+//         def add_regularization_output = AddRegularizationToTestResults(
+//             model_result_merged.test_results_before_regularization,
+//             collected_regularized_model_parameters_chunk
+//         )
+//
+//         CreateVolcanoPlots(add_regularization_output.test_results)
 
 }
