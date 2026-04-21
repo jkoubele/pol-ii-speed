@@ -210,6 +210,65 @@ class Pol2Model(nn.Module):
         return df_param
 
 
+class SplicingModel(nn.Module):
+
+    def __init__(self,
+                 feature_names: list[str],
+                 intron_names: list[str]):
+        super().__init__()
+        self.feature_names = feature_names
+        self.intron_names = intron_names
+
+        num_features = len(feature_names)
+        num_introns = len(intron_names)
+
+        self.lfc = nn.Parameter(torch.zeros(num_features, 1))
+        self.theta = nn.Parameter(torch.zeros(num_introns))
+
+    def initialize_theta(self,
+                         coverage: torch.Tensor,
+                         pi_eps: float = 0.05,
+                         num_pi_grid_points: int = 20) -> None:
+        aggregated_coverage = coverage.sum(dim=0)
+        pi_grid = torch.linspace(
+            pi_eps,
+            1 - pi_eps,
+            num_pi_grid_points,
+            device=aggregated_coverage.device,
+            dtype=aggregated_coverage.dtype,
+        )
+        coverage_loss = CoverageLoss(num_position_coverage=aggregated_coverage.shape[1])
+        coverage_loss_grid = coverage_loss.loss_for_pi_grid(pi_grid, aggregated_coverage)
+        best_pi = pi_grid[coverage_loss_grid.argmin(dim=0)]
+        self.theta.data.copy_(torch.logit(best_pi, eps=pi_eps))
+
+    def forward(self, design_matrix: torch.Tensor):
+        logit_term = design_matrix @ self.lfc
+        pi = torch.sigmoid(self.theta + logit_term)
+        return pi
+
+    def get_param_df(self) -> pd.DataFrame:
+        model_parameters = dict(self.named_parameters())
+        parameter_data: list[dict] = []
+        for param_name, param_value in model_parameters.items():
+            if param_name == 'lfc':
+                for feature_index, feature_name in enumerate(self.feature_names):
+                    parameter_data.append({'parameter_type': param_name,
+                                           'intron_name': None,
+                                           'feature_name': feature_name,
+                                           'value': param_value[feature_index, 0].item()})
+            elif param_name == 'theta':
+                for intron_index, intron_name in enumerate(self.intron_names):
+                    parameter_data.append({'parameter_type': param_name,
+                                           'intron_name': intron_name,
+                                           'feature_name': None,
+                                           'value': param_value[intron_index].item()})
+            else:
+                raise RuntimeError(f"Unexpected parameter name: {param_name}")
+        df_param = pd.DataFrame(data=parameter_data)
+        return df_param
+
+
 class CoverageLoss(nn.Module):
 
     def __init__(self, num_position_coverage: int = 100):
