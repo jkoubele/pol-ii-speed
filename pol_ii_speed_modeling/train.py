@@ -4,12 +4,12 @@ import scipy
 import torch
 from dataclasses import dataclass
 from scipy import stats
-from torch import optim
+from torch import nn, optim
 from torch.func import functional_call, hessian
-from typing import Optional, OrderedDict
+from typing import Callable, Optional, OrderedDict
 
 from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model, TestableParameters, \
-    LRTSpecification
+    LRTSpecification, SplicingModel, CoverageLoss
 
 LOSS_CLAMP_VALUE = 1e30
 
@@ -32,65 +32,27 @@ class CacheForRegularization:
     intron_specific_lfc: bool
 
 
-def train_model(model: Pol2Model,
-                gene_data: GeneData,
-                dataset_metadata: DatasetMetadata,
-                pol_2_total_loss: Pol2TotalLoss,
-                reduced_matrix_name: Optional[str] = None,
-                max_epochs=200,
-                max_patience=5,
-                loss_change_tolerance=1e-6,
-                regularization_coefficients_beta: Optional[torch.Tensor] = None,
-                regularization_coefficients_gamma: Optional[torch.Tensor] = None) -> tuple[Pol2Model, TrainingResults]:
-    reduced_matrix = None if reduced_matrix_name is None else dataset_metadata.reduced_matrices[reduced_matrix_name]
+def make_lbfgs_optimizer(model: nn.Module) -> optim.LBFGS:
+    return optim.LBFGS(
+        model.parameters(),
+        lr=0.05,
+        max_iter=20,
+        tolerance_change=1e-9,
+        tolerance_grad=1e-7,
+        history_size=100,
+        line_search_fn='strong_wolfe',
+    )
 
-    optimizer = optim.LBFGS(model.parameters(),
-                            lr=0.05,
-                            max_iter=20,
-                            tolerance_change=1e-09,
-                            tolerance_grad=1e-07,
-                            history_size=100,
-                            line_search_fn='strong_wolfe')
 
-    def closure():
-        optimizer.zero_grad()
-        predicted_reads_exon, predicted_reads_intron, pi = model(design_matrix=dataset_metadata.design_matrix,
-                                                                 log_library_sizes=dataset_metadata.log_library_sizes,
-                                                                 isoform_length_offset=gene_data.isoform_length_offset,
-                                                                 reduced_design_matrix=reduced_matrix)
-        loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
-                                reads_introns=gene_data.intron_reads,
-                                coverage=gene_data.coverage,
-                                predicted_reads_exon=predicted_reads_exon,
-                                predicted_reads_intron=predicted_reads_intron,
-                                pi=pi)
-        if regularization_coefficients_beta is not None:
-            loss += torch.sum(regularization_coefficients_beta * torch.square(model.beta))
-        if regularization_coefficients_gamma is not None:
-            loss += torch.sum(regularization_coefficients_gamma * torch.square(model.gamma))
-        if not torch.isfinite(loss):
-            return torch.as_tensor(LOSS_CLAMP_VALUE, dtype=loss.dtype, device=loss.device)
-        loss.backward()
-        return loss
-
-    def evaluate_loss():
-        with torch.no_grad():
-            predicted_reads_exon, predicted_reads_intron, pi = model(design_matrix=dataset_metadata.design_matrix,
-                                                                     log_library_sizes=dataset_metadata.log_library_sizes,
-                                                                     isoform_length_offset=gene_data.isoform_length_offset,
-                                                                     reduced_design_matrix=reduced_matrix)
-            loss = pol_2_total_loss(reads_exon=gene_data.exon_reads,
-                                    reads_introns=gene_data.intron_reads,
-                                    coverage=gene_data.coverage,
-                                    predicted_reads_exon=predicted_reads_exon,
-                                    predicted_reads_intron=predicted_reads_intron,
-                                    pi=pi)
-            if regularization_coefficients_beta is not None:
-                loss += torch.sum(regularization_coefficients_beta * torch.square(model.beta))
-            if regularization_coefficients_gamma is not None:
-                loss += torch.sum(regularization_coefficients_gamma * torch.square(model.gamma))
-            return loss
-
+def train_model(
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        closure: Callable[[], torch.Tensor],
+        evaluate_loss: Callable[[], torch.Tensor],
+        max_epochs=200,
+        max_patience=5,
+        loss_change_tolerance=1e-6,
+) -> tuple[nn.Module, TrainingResults]:
     previous_loss = None
     patience_counter = 0
 
@@ -127,14 +89,88 @@ def train_model(model: Pol2Model,
         previous_loss = loss
 
     model.load_state_dict(best_state_dict)
-    training_results = TrainingResults(final_loss=loss,
-                                       converged_within_max_epochs=converged_within_max_epochs,
-                                       num_epochs=epoch + 1,
-                                       losses=losses,
-                                       training_diverged=training_diverged
-                                       )
+    training_results = TrainingResults(
+        final_loss=loss,
+        converged_within_max_epochs=converged_within_max_epochs,
+        num_epochs=epoch + 1,
+        losses=losses,
+        training_diverged=training_diverged,
+    )
 
     return model, training_results
+
+
+def _make_pol2_closures(
+        model: Pol2Model,
+        optimizer: optim.Optimizer,
+        gene_data: GeneData,
+        dataset_metadata: DatasetMetadata,
+        reduced_matrix: Optional[torch.Tensor] = None,
+        regularization_coefficients_beta: Optional[torch.Tensor] = None,
+        regularization_coefficients_gamma: Optional[torch.Tensor] = None,
+) -> tuple[Callable[[], torch.Tensor], Callable[[], torch.Tensor]]:
+    pol_2_total_loss = Pol2TotalLoss().to(next(model.parameters()).device)
+
+    def _compute_loss() -> torch.Tensor:
+        predicted_reads_exon, predicted_reads_intron, pi = model(
+            design_matrix=dataset_metadata.design_matrix,
+            log_library_sizes=dataset_metadata.log_library_sizes,
+            isoform_length_offset=gene_data.isoform_length_offset,
+            reduced_design_matrix=reduced_matrix,
+        )
+        loss = pol_2_total_loss(
+            reads_exon=gene_data.exon_reads,
+            reads_introns=gene_data.intron_reads,
+            coverage=gene_data.coverage,
+            predicted_reads_exon=predicted_reads_exon,
+            predicted_reads_intron=predicted_reads_intron,
+            pi=pi,
+        )
+        if regularization_coefficients_beta is not None:
+            loss += torch.sum(regularization_coefficients_beta * torch.square(model.beta))
+        if regularization_coefficients_gamma is not None:
+            loss += torch.sum(regularization_coefficients_gamma * torch.square(model.gamma))
+        return loss
+
+    def closure() -> torch.Tensor:
+        optimizer.zero_grad()
+        loss = _compute_loss()
+        if not torch.isfinite(loss):
+            return torch.as_tensor(LOSS_CLAMP_VALUE, dtype=loss.dtype, device=loss.device)
+        loss.backward()
+        return loss
+
+    def evaluate_loss() -> torch.Tensor:
+        with torch.no_grad():
+            return _compute_loss()
+
+    return closure, evaluate_loss
+
+
+def make_splicing_closures(
+        model: SplicingModel,
+        optimizer: optim.Optimizer,
+        coverage: torch.Tensor,
+        design_matrix: torch.Tensor,
+) -> tuple[Callable[[], torch.Tensor], Callable[[], torch.Tensor]]:
+    coverage_loss_fn = CoverageLoss(num_position_coverage=coverage.shape[2]).to(coverage.device)
+
+    def _compute_loss() -> torch.Tensor:
+        return coverage_loss_fn(model(design_matrix), coverage)
+
+    def closure() -> torch.Tensor:
+        optimizer.zero_grad()
+        loss = _compute_loss()
+        if not torch.isfinite(loss):
+            return torch.as_tensor(LOSS_CLAMP_VALUE, dtype=loss.dtype, device=loss.device)
+        loss.backward()
+        return loss
+
+    def evaluate_loss() -> torch.Tensor:
+        with torch.no_grad():
+            return _compute_loss()
+
+    return closure, evaluate_loss
 
 
 def flatten_hessian_dict(hessian_dict, model_parameters):
@@ -158,9 +194,9 @@ def flatten_hessian_dict(hessian_dict, model_parameters):
 
 
 def get_fisher_information_matrix(model: Pol2Model,
-                                  pol_2_total_loss: Pol2TotalLoss,
                                   gene_data: GeneData,
                                   dataset_metadata: DatasetMetadata) -> torch.Tensor:
+    pol_2_total_loss = Pol2TotalLoss().to(next(model.parameters()).device)
     model_parameters = dict(model.named_parameters())
 
     def loss_by_model_parameters(model_parameters):
@@ -207,7 +243,7 @@ def add_wald_test_results(df_param: pd.DataFrame, hessian_matrix: torch.Tensor) 
         raise ValueError(f'Unexpected value of df_param.index: {df_param=}')
 
     # hessian_subset should have a full rank by the way it is constructed:
-    # assert hessian_subset.shape[0] == torch.linalg.matrix_rank(hessian_subset)    
+    # assert hessian_subset.shape[0] == torch.linalg.matrix_rank(hessian_subset)
 
     cov_matrix = torch.linalg.pinv(hessian_subset).cpu()
     standard_errors = torch.sqrt(torch.clamp(torch.diag(cov_matrix), min=0.0)).numpy()
@@ -232,17 +268,17 @@ def get_model_results(gene_data: GeneData,
                       ) -> tuple[pd.DataFrame, pd.DataFrame, StateDict]:
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
-    pol_2_total_loss = Pol2TotalLoss().to(device)
 
     model_full = Pol2Model(feature_names=dataset_metadata.feature_names,
                            intron_names=gene_data.intron_names,
                            intron_specific_lfc=intron_specific_lfc).to(device)
     model_full.initialize_intercepts(gene_data, dataset_metadata.library_sizes)
 
-    model_full, training_results_full = train_model(model=model_full,
-                                                    gene_data=gene_data,
-                                                    dataset_metadata=dataset_metadata,
-                                                    pol_2_total_loss=pol_2_total_loss)
+    optimizer_full = make_lbfgs_optimizer(model_full)
+    closure_full, evaluate_loss_full = _make_pol2_closures(
+        model_full, optimizer_full, gene_data, dataset_metadata,
+    )
+    model_full, training_results_full = train_model(model_full, optimizer_full, closure_full, evaluate_loss_full)
 
     model_param_df = model_full.get_param_df()
     model_param_df['gene_name'] = gene_data.gene_name
@@ -253,7 +289,6 @@ def get_model_results(gene_data: GeneData,
 
     # Wald test
     fisher_information_matrix = get_fisher_information_matrix(model=model_full,
-                                                              pol_2_total_loss=pol_2_total_loss,
                                                               gene_data=gene_data,
                                                               dataset_metadata=dataset_metadata)
     model_param_df = add_wald_test_results(model_param_df, fisher_information_matrix)
@@ -292,11 +327,15 @@ def get_model_results(gene_data: GeneData,
                                                                              dataset_metadata.design_matrix @ lfc_full_model).solution
 
                 model_reduced.load_state_dict(hot_start_state_dict)
-                model_reduced, training_results_reduced = train_model(model=model_reduced,
-                                                                      gene_data=gene_data,
-                                                                      dataset_metadata=dataset_metadata,
-                                                                      pol_2_total_loss=pol_2_total_loss,
-                                                                      reduced_matrix_name=lrt_metadata_row['test_id'])
+
+                optimizer_reduced = make_lbfgs_optimizer(model_reduced)
+                closure_reduced, evaluate_loss_reduced = _make_pol2_closures(
+                    model_reduced, optimizer_reduced, gene_data, dataset_metadata,
+                    reduced_matrix=reduced_design_matrix,
+                )
+                model_reduced, training_results_reduced = train_model(
+                    model_reduced, optimizer_reduced, closure_reduced, evaluate_loss_reduced,
+                )
 
                 test_result = lrt_metadata_row.to_dict()
                 test_result['tested_parameter'] = lrt_specification.tested_parameter
@@ -338,7 +377,6 @@ def get_regularized_model_results(gene_data: GeneData,
                                   ) -> pd.DataFrame:
     gene_data = gene_data.to(device)
     dataset_metadata = dataset_metadata.to(device)
-    pol_2_total_loss = Pol2TotalLoss().to(device)
     regularization_coefficients_df = regularization_coefficients_df.set_index(['parameter_type', 'feature_name'])
 
     model_regularized = Pol2Model(feature_names=dataset_metadata.feature_names,
@@ -354,12 +392,15 @@ def get_regularized_model_results(gene_data: GeneData,
         regularization_coefficients_gamma[feature_index] = regularization_coefficients_df.loc[('gamma', feature_name)][
             'lambda']
 
-    model_regularized, training_results_regularized = train_model(model=model_regularized,
-                                                                  gene_data=gene_data,
-                                                                  dataset_metadata=dataset_metadata,
-                                                                  pol_2_total_loss=pol_2_total_loss,
-                                                                  regularization_coefficients_beta=regularization_coefficients_beta,
-                                                                  regularization_coefficients_gamma=regularization_coefficients_gamma)
+    optimizer_regularized = make_lbfgs_optimizer(model_regularized)
+    closure_regularized, evaluate_loss_regularized = _make_pol2_closures(
+        model_regularized, optimizer_regularized, gene_data, dataset_metadata,
+        regularization_coefficients_beta=regularization_coefficients_beta,
+        regularization_coefficients_gamma=regularization_coefficients_gamma,
+    )
+    model_regularized, training_results_regularized = train_model(
+        model_regularized, optimizer_regularized, closure_regularized, evaluate_loss_regularized,
+    )
 
     model_param_df = model_regularized.get_param_df()
     model_param_df['gene_name'] = gene_data.gene_name

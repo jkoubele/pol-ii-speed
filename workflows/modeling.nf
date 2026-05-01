@@ -5,7 +5,6 @@ def model_run_id = "model_run_" + new Date().format("dd_MMM_yyyy_HH_mm_ss")
 process WriteDesignMetadata {
     input:
     val design_formula
-    val intron_specific_lfc
     val lrt_contrasts
 
     output:
@@ -16,8 +15,7 @@ process WriteDesignMetadata {
 
     script:
     def design_obj = [
-        design_formula      : design_formula,
-        intron_specific_lfc : intron_specific_lfc
+        design_formula : design_formula,
     ]
 
     def design_json_str       = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(design_obj))
@@ -89,8 +87,7 @@ process FitModel {
         path(intron_counts_matrix),
         path(library_size_factors),
         path(isoform_length_factors),
-        path(coverage_parquet_files),
-        val(intron_specific_lfc)
+        path(coverage_parquet_files)
     )
 
     output:
@@ -114,7 +111,7 @@ process FitModel {
     --coverage_data_folder . \
     --lrt_metadata ${lrt_metadata} \
     --reduced_matrices_folder ${reduced_matrices_folder} \
-    --intron_specific_lfc ${intron_specific_lfc} \
+    --intron_specific_lfc False \
     --output_folder . \
     --output_name_suffix _${chunk_name}
     """
@@ -233,9 +230,10 @@ workflow modeling_workflow {
         coverage_files_input
         design_formula
         lrt_contrasts
-        intron_specific_lfc
         modelable_genes_input
         modelable_introns_input
+        fit_pol_2_model
+        fit_global_splicing_model
 
 
     main:
@@ -243,7 +241,6 @@ workflow modeling_workflow {
 
         def design_metadata = WriteDesignMetadata(
             design_formula,
-            intron_specific_lfc,
             lrt_contrasts
         )
 
@@ -258,46 +255,50 @@ workflow modeling_workflow {
 
         def modeled_genes = GetModeledGenes(get_modeled_genes_input)
 
-        def model_input = modeled_genes.gene_names_chunks
-            .flatten()
-            .map{ file -> tuple(file, file.baseName)}
-            .combine(modeled_genes.modeled_introns)
-            .combine(design_matrices_data.design_matrix)
-            .combine(design_matrices_data.lrt_metadata)
-            .combine(design_matrices_data.reduced_design_matrices)
-            .combine(exon_counts_input)
-            .combine(intron_counts_input)
-            .combine(library_size_factors_input)
-            .combine(isoform_length_factors_input)
-            // Wrapping coverage_files_input in an extra list prevents unwanted flattening behavior in .combine()
-            .combine(coverage_files_input.map { file_list -> tuple([file_list]) })
-            // Raw intron_specific_lfc is bool and cannot be used in combine()
-            .combine(Channel.value(intron_specific_lfc))
+        if (fit_pol_2_model) {
+            def model_input = modeled_genes.gene_names_chunks
+                .flatten()
+                .map{ file -> tuple(file, file.baseName)}
+                .combine(modeled_genes.modeled_introns)
+                .combine(design_matrices_data.design_matrix)
+                .combine(design_matrices_data.lrt_metadata)
+                .combine(design_matrices_data.reduced_design_matrices)
+                .combine(exon_counts_input)
+                .combine(intron_counts_input)
+                .combine(library_size_factors_input)
+                .combine(isoform_length_factors_input)
+                // Wrapping coverage_files_input in an extra list prevents unwanted flattening behavior in .combine()
+                .combine(coverage_files_input.map { file_list -> tuple([file_list]) })
 
-        def fit_model_output = FitModel(model_input)
+            def fit_model_output = FitModel(model_input)
 
-        def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.filter { it != null }.collect()
-        def collected_test_results_chunks  = fit_model_output.test_results_chunk.filter { it != null }.collect()
+            def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.filter { it != null }.collect()
+            def collected_test_results_chunks  = fit_model_output.test_results_chunk.filter { it != null }.collect()
 
-        def model_result_merged = MergeModelResultChunks(
-            collected_model_parameters_chunks,
-            collected_test_results_chunks
-        )
+            def model_result_merged = MergeModelResultChunks(
+                collected_model_parameters_chunks,
+                collected_test_results_chunks
+            )
 
-        def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
+            def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
 
-        def regularized_model_input = fit_model_output.cache_for_regularization
-            .combine(adaptive_shrinkage_out.regularization_coefficients)
+            def regularized_model_input = fit_model_output.cache_for_regularization
+                .combine(adaptive_shrinkage_out.regularization_coefficients)
 
-        def fit_regularized_model_output = FitRegularizedModel(regularized_model_input)
+            def fit_regularized_model_output = FitRegularizedModel(regularized_model_input)
 
-        def collected_regularized_model_parameters_chunk = fit_regularized_model_output.regularized_model_parameters_chunk.collect()
+            def collected_regularized_model_parameters_chunk = fit_regularized_model_output.regularized_model_parameters_chunk.collect()
 
-        def add_regularization_output = AddRegularizationToTestResults(
-            model_result_merged.test_results_before_regularization,
-            collected_regularized_model_parameters_chunk
-        )
+            def add_regularization_output = AddRegularizationToTestResults(
+                model_result_merged.test_results_before_regularization,
+                collected_regularized_model_parameters_chunk
+            )
 
-        CreateVolcanoPlots(add_regularization_output.test_results)
+            CreateVolcanoPlots(add_regularization_output.test_results)
+        }
+
+        if (fit_global_splicing_model) {
+            // TODO: implement global splicing model fitting
+        }
 
 }

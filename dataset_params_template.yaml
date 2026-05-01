@@ -25,7 +25,9 @@ ignore_tx_version: true # Passed to tximport (argument ignoreTxVersion). If true
 custom_gene_list: null # Optional path to a CSV file with genes to fit the model on. If left null, all protein coding genes will be used.
 
 design_formula: "~your+design+formula" # Design formula, specified as formulas in R.
-intron_specific_lfc: false # Whether elongation speed and splicing speed LFC should be intron-specific (true) or gene-specific (false).
+
+fit_pol_2_model: true
+fit_global_splicing_model: true
 
 lrt_contrasts: # List of contrasts for likelihood ratio tests.
   - variable: "your_categorical_variable_to_test" # For categorical variables, please specify groups (levels) that you want to compare
