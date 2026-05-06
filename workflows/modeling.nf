@@ -296,6 +296,25 @@ process MergeRegularization {
     """
 }
 
+process PostprocessSplicingResultsAndPlot {
+    input:
+    path raw_test_results
+    val model_type_subfolder
+
+    output:
+    path("test_results/test_results.tsv"), emit: test_results
+    path("test_results/volcano_plots/**")
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/${model_type_subfolder}", mode: 'copy'
+
+    script:
+    """
+    postprocess_splicing_results.R \
+    --test_results $raw_test_results \
+    --output_folder test_results
+    """
+}
+
 process PostprocessPol2ResultsAndPlot {
     input:
     path raw_test_results
@@ -415,11 +434,13 @@ workflow gene_specific_splicing_model_subworkflow {
                 .combine(adaptive_shrinkage_out.regularization_coefficients)
         )
 
-        MergeRegularization(
+        def merge_regularization_output = MergeRegularization(
             model_result_merged.test_results_before_regularization,
             fit_regularized_model_output.regularized_model_parameters_chunk.collect(),
             model_subfolder
         )
+
+        PostprocessSplicingResultsAndPlot(merge_regularization_output.raw_test_results, model_subfolder)
 }
 
 
