@@ -52,6 +52,7 @@ def train_model(
         max_epochs=200,
         max_patience=5,
         loss_change_tolerance=1e-6,
+        verbose: bool = False,
 ) -> tuple[nn.Module, TrainingResults]:
     previous_loss = None
     patience_counter = 0
@@ -68,6 +69,8 @@ def train_model(
         loss_tensor = evaluate_loss()
         loss = loss_tensor.item()
         losses.append(loss)
+        if verbose:
+            print(f'Epoch {epoch + 1}/{max_epochs}: loss={loss:.6f}', flush=True)
         if not torch.isfinite(loss_tensor):
             training_diverged = True
             break
@@ -193,25 +196,10 @@ def flatten_hessian_dict(hessian_dict, model_parameters):
     return hessian_matrix
 
 
-def get_fisher_information_matrix(model: Pol2Model,
-                                  gene_data: GeneData,
-                                  dataset_metadata: DatasetMetadata) -> torch.Tensor:
-    pol_2_total_loss = Pol2TotalLoss().to(next(model.parameters()).device)
+def get_fisher_information_matrix(model: nn.Module,
+                                  loss_fn: Callable[[StateDict], torch.Tensor]) -> torch.Tensor:
     model_parameters = dict(model.named_parameters())
-
-    def loss_by_model_parameters(model_parameters):
-        outputs = functional_call(model, model_parameters, (dataset_metadata.design_matrix,
-                                                            dataset_metadata.log_library_sizes,
-                                                            gene_data.isoform_length_offset))
-        predicted_reads_exon, predicted_reads_intron, pi = outputs
-        return pol_2_total_loss(reads_exon=gene_data.exon_reads,
-                                reads_introns=gene_data.intron_reads,
-                                coverage=gene_data.coverage,
-                                predicted_reads_exon=predicted_reads_exon,
-                                predicted_reads_intron=predicted_reads_intron,
-                                pi=pi)
-
-    hessian_dict = hessian(loss_by_model_parameters)(model_parameters)
+    hessian_dict = hessian(loss_fn)(model_parameters)
     hessian_matrix = flatten_hessian_dict(hessian_dict, model_parameters)
     return hessian_matrix
 
@@ -288,9 +276,21 @@ def get_model_results(gene_data: GeneData,
         'training_converged_within_max_epochs_full_model'] = training_results_full.converged_within_max_epochs
 
     # Wald test
-    fisher_information_matrix = get_fisher_information_matrix(model=model_full,
-                                                              gene_data=gene_data,
-                                                              dataset_metadata=dataset_metadata)
+    pol_2_total_loss = Pol2TotalLoss().to(device)
+
+    def pol2_loss_by_params(params):
+        predicted_reads_exon, predicted_reads_intron, pi = functional_call(
+            model_full, params,
+            (dataset_metadata.design_matrix, dataset_metadata.log_library_sizes, gene_data.isoform_length_offset),
+        )
+        return pol_2_total_loss(reads_exon=gene_data.exon_reads,
+                                reads_introns=gene_data.intron_reads,
+                                coverage=gene_data.coverage,
+                                predicted_reads_exon=predicted_reads_exon,
+                                predicted_reads_intron=predicted_reads_intron,
+                                pi=pi)
+
+    fisher_information_matrix = get_fisher_information_matrix(model_full, pol2_loss_by_params)
     model_param_df = add_wald_test_results(model_param_df, fisher_information_matrix)
     model_param_df = model_param_df.set_index(["parameter_type", "feature_name", "intron_name"], drop=False)
 
@@ -409,3 +409,88 @@ def get_regularized_model_results(gene_data: GeneData,
     model_param_df[
         'training_converged_within_max_epochs_regularized_model'] = training_results_regularized.converged_within_max_epochs
     return model_param_df
+
+
+def get_splicing_model_results(
+        coverage: torch.Tensor,
+        dataset_metadata: DatasetMetadata,
+        intron_names: list[str],
+        device: str = 'cpu',
+        verbose: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    coverage = coverage.to(device)
+    dataset_metadata = dataset_metadata.to(device)
+
+    model_full = SplicingModel(
+        feature_names=dataset_metadata.feature_names,
+        intron_names=intron_names,
+    ).to(device)
+    model_full.initialize_theta(coverage)
+
+    optimizer_full = make_lbfgs_optimizer(model_full)
+    closure_full, evaluate_loss_full = make_splicing_closures(
+        model_full, optimizer_full, coverage, dataset_metadata.design_matrix,
+    )
+    model_full, results_full = train_model(model_full, optimizer_full, closure_full, evaluate_loss_full,
+                                            verbose=verbose)
+
+    model_param_df = model_full.get_param_df()
+    model_param_df['loss_full_model'] = results_full.final_loss
+    model_param_df['training_diverged_full_model'] = results_full.training_diverged
+    model_param_df['training_converged_within_max_epochs_full_model'] = results_full.converged_within_max_epochs
+
+    coverage_loss_fn = CoverageLoss(num_position_coverage=coverage.shape[2]).to(device)
+
+    def splicing_loss_by_params(params):
+        pi = functional_call(model_full, params, (dataset_metadata.design_matrix,))
+        return coverage_loss_fn(pi, coverage)
+
+    fisher_information_matrix = get_fisher_information_matrix(model_full, splicing_loss_by_params)
+    model_param_df = add_wald_test_results(model_param_df, fisher_information_matrix)
+    model_param_df = model_param_df.set_index(['parameter_type', 'feature_name', 'intron_name'], drop=False)
+
+    test_results_list: list[dict] = []
+    for _, lrt_row in dataset_metadata.lrt_metadata.iterrows():
+        reduced_matrix = dataset_metadata.reduced_matrices[lrt_row['test_id']].to(device)
+        num_reduced_features = reduced_matrix.shape[1]
+        placeholder_names = [f'reduced_feature_{i}' for i in range(num_reduced_features)]
+
+        model_reduced = SplicingModel(
+            feature_names=placeholder_names,
+            intron_names=intron_names,
+        ).to(device)
+
+        with torch.no_grad():
+            model_reduced.theta.data.copy_(model_full.theta.data)
+            if num_reduced_features > 0:
+                full_lfc_contribution = dataset_metadata.design_matrix @ model_full.lfc
+                model_reduced.lfc.data.copy_(
+                    torch.linalg.lstsq(reduced_matrix, full_lfc_contribution).solution
+                )
+
+        optimizer_reduced = make_lbfgs_optimizer(model_reduced)
+        closure_reduced, evaluate_loss_reduced = make_splicing_closures(
+            model_reduced, optimizer_reduced, coverage, reduced_matrix,
+        )
+        model_reduced, results_reduced = train_model(
+            model_reduced, optimizer_reduced, closure_reduced, evaluate_loss_reduced,
+            verbose=verbose,
+        )
+
+        lfc_positive = 0.0 if pd.isna(lrt_row['lfc_column_positive']) else \
+            model_param_df.loc[('lfc', lrt_row['lfc_column_positive'], None)]['value']
+        lfc_negative = 0.0 if pd.isna(lrt_row['lfc_column_negative']) else \
+            model_param_df.loc[('lfc', lrt_row['lfc_column_negative'], None)]['value']
+
+        chi2_stat = 2 * (results_reduced.final_loss - results_full.final_loss)
+        test_result = lrt_row.to_dict()
+        test_result['lfc'] = lfc_positive - lfc_negative
+        test_result['loss_full_model'] = results_full.final_loss
+        test_result['loss_reduced_model'] = results_reduced.final_loss
+        test_result['chi2_test_statistics'] = chi2_stat
+        test_result['p_value'] = 1 - stats.chi2.cdf(chi2_stat, df=lrt_row['lrt_df'])
+        test_result['training_diverged_reduced_model'] = results_reduced.training_diverged
+        test_result['training_converged_within_max_epochs_reduced_model'] = results_reduced.converged_within_max_epochs
+        test_results_list.append(test_result)
+
+    return model_param_df, pd.DataFrame(test_results_list)

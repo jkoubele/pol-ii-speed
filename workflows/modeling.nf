@@ -118,15 +118,85 @@ process FitModel {
 
 }
 
+process FitGeneSplicingModel {
+    input:
+    tuple(
+        path(modeled_genes_chunk),
+        val(chunk_name),
+        path(modeled_introns),
+        path(design_matrix),
+        path(lrt_metadata),
+        path(reduced_matrices_folder),
+        path(exon_counts_matrix),
+        path(intron_counts_matrix),
+        path(library_size_factors),
+        path(isoform_length_factors),
+        path(coverage_parquet_files)
+    )
+
+    output:
+    path("model_parameters*.tsv"), emit: model_parameters_chunk
+    path("test_results*.tsv"), emit: test_results_chunk
+
+    script:
+    """
+    export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
+    fit_gene_specific_splicing_model.py \
+    --modeled_genes $modeled_genes_chunk \
+    --modeled_introns $modeled_introns \
+    --design_matrix $design_matrix \
+    --exon_counts $exon_counts_matrix \
+    --intron_counts $intron_counts_matrix \
+    --library_size_factors $library_size_factors \
+    --isoform_length_factors $isoform_length_factors \
+    --coverage_data_folder . \
+    --lrt_metadata ${lrt_metadata} \
+    --reduced_matrices_folder ${reduced_matrices_folder} \
+    --output_folder . \
+    --output_name_suffix _${chunk_name}
+    """
+}
+
+process FitGlobalSplicingModel {
+    input:
+    tuple(
+        path(modeled_introns),
+        path(design_matrix),
+        path(lrt_metadata),
+        path(reduced_matrices_folder),
+        path(library_size_factors),
+        path(coverage_parquet_files)
+    )
+
+    output:
+    path("model_parameters.tsv"), emit: model_parameters
+    path("test_results.tsv"), emit: test_results
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/global_splicing_model", mode: 'copy'
+
+    script:
+    """
+    export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
+    fit_global_splicing_model.py \
+    --modeled_introns $modeled_introns \
+    --design_matrix $design_matrix \
+    --library_size_factors $library_size_factors \
+    --lrt_metadata ${lrt_metadata} \
+    --reduced_matrices_folder ${reduced_matrices_folder} \
+    --coverage_data_folder .
+    """
+}
+
 process MergeModelResultChunks {
     input:
     path model_parameters_chunks
     path test_results_chunks
+    val model_type_subfolder
 
     output:
     path("test_results_before_regularization.tsv"), emit: test_results_before_regularization
     path("model_parameters.tsv"), emit: model_parameters
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results",
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/${model_type_subfolder}",
      mode: 'copy',
      saveAs: { filename ->
             if( filename == 'test_results_before_regularization.tsv' ) null // Not publishing intermediate test results
@@ -146,11 +216,12 @@ process MergeModelResultChunks {
 process AdaptiveShrinkage {
     input:
     path model_parameters
+    val model_type_subfolder
 
     output:
     path("regularization_coefficients.tsv"), emit: regularization_coefficients
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/adaptive_shrinkage", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/${model_type_subfolder}", mode: 'copy'
 
     script:
     """
@@ -186,12 +257,13 @@ process AddRegularizationToTestResults {
     input:
     path test_results_before_regularization
     path regularized_model_parameters_chunks
+    val model_type_subfolder
 
     output:
     path("test_results.tsv"), emit: test_results
     path("regularized_model_parameters.tsv")
 
-    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/model_results", mode: 'copy'
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/${model_type_subfolder}", mode: 'copy'
 
     script:
     """
@@ -234,6 +306,7 @@ workflow modeling_workflow {
         modelable_introns_input
         fit_pol_2_model
         fit_global_splicing_model
+        fit_gene_specific_splicing_model
 
 
     main:
@@ -256,6 +329,7 @@ workflow modeling_workflow {
         def modeled_genes = GetModeledGenes(get_modeled_genes_input)
 
         if (fit_pol_2_model) {
+            def model_subfolder = 'gene_specific_pol_2_model'
             def model_input = modeled_genes.gene_names_chunks
                 .flatten()
                 .map{ file -> tuple(file, file.baseName)}
@@ -272,15 +346,16 @@ workflow modeling_workflow {
 
             def fit_model_output = FitModel(model_input)
 
-            def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.filter { it != null }.collect()
-            def collected_test_results_chunks  = fit_model_output.test_results_chunk.filter { it != null }.collect()
+            def collected_model_parameters_chunks  = fit_model_output.model_parameters_chunk.collect()
+            def collected_test_results_chunks  = fit_model_output.test_results_chunk.collect()
 
             def model_result_merged = MergeModelResultChunks(
                 collected_model_parameters_chunks,
-                collected_test_results_chunks
+                collected_test_results_chunks,
+                model_subfolder
             )
 
-            def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters)
+            def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters, model_subfolder)
 
             def regularized_model_input = fit_model_output.cache_for_regularization
                 .combine(adaptive_shrinkage_out.regularization_coefficients)
@@ -291,14 +366,53 @@ workflow modeling_workflow {
 
             def add_regularization_output = AddRegularizationToTestResults(
                 model_result_merged.test_results_before_regularization,
-                collected_regularized_model_parameters_chunk
+                collected_regularized_model_parameters_chunk,
+                model_subfolder
             )
 
             CreateVolcanoPlots(add_regularization_output.test_results)
         }
 
+        if (fit_gene_specific_splicing_model) {
+            def model_subfolder = 'gene_specific_splicing_model'
+            def gene_splicing_model_input = modeled_genes.gene_names_chunks
+                .flatten()
+                .map{ file -> tuple(file, file.baseName)}
+                .combine(modeled_genes.modeled_introns)
+                .combine(design_matrices_data.design_matrix)
+                .combine(design_matrices_data.lrt_metadata)
+                .combine(design_matrices_data.reduced_design_matrices)
+                .combine(exon_counts_input)
+                .combine(intron_counts_input)
+                .combine(library_size_factors_input)
+                .combine(isoform_length_factors_input)
+                // Wrapping coverage_files_input in an extra list prevents unwanted flattening behavior in .combine()
+                .combine(coverage_files_input.map { file_list -> tuple([file_list]) })
+
+            def fit_gene_splicing_model_output = FitGeneSplicingModel(gene_splicing_model_input)
+
+            def collected_model_parameters_chunks = fit_gene_splicing_model_output.model_parameters_chunk.collect()
+            def collected_test_results_chunks = fit_gene_splicing_model_output.test_results_chunk.collect()
+
+            def gene_splicing_model_result_merged = MergeModelResultChunks(
+                collected_model_parameters_chunks,
+                collected_test_results_chunks,
+                model_subfolder
+            )
+
+            AdaptiveShrinkage(gene_splicing_model_result_merged.model_parameters, model_subfolder)
+        }
+
         if (fit_global_splicing_model) {
-            // TODO: implement global splicing model fitting
+            def splicing_model_input = modeled_genes.modeled_introns
+                .combine(design_matrices_data.design_matrix)
+                .combine(design_matrices_data.lrt_metadata)
+                .combine(design_matrices_data.reduced_design_matrices)
+                .combine(library_size_factors_input)
+                // Wrapping coverage_files_input in an extra list prevents unwanted flattening behavior in .combine()
+                .combine(coverage_files_input.map { file_list -> tuple([file_list]) })
+
+            FitGlobalSplicingModel(splicing_model_input)
         }
 
 }

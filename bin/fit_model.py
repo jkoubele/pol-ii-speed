@@ -2,9 +2,9 @@
 
 import argparse
 from pathlib import Path
-import torch
 
 import pandas as pd
+import torch
 from tqdm import tqdm
 
 from pol_ii_speed_modeling.load_dataset import load_dataset_metadata, load_gene_data_list
