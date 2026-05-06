@@ -85,7 +85,7 @@ if __name__ == "__main__":
         dtype=torch.float32,
     )
 
-    model_param_df, test_results_df = get_splicing_model_results(
+    model_param_df, test_results_df, _ = get_splicing_model_results(
         coverage=coverage,
         dataset_metadata=dataset_metadata,
         intron_names=intron_names,

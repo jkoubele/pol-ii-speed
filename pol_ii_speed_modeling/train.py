@@ -29,7 +29,7 @@ class TrainingResults:
 class CacheForRegularization:
     training_input_per_gene: list[tuple[GeneData, StateDict]]
     dataset_metadata: DatasetMetadata
-    intron_specific_lfc: bool
+    intron_specific_lfc: Optional[bool] = None
 
 
 def make_lbfgs_optimizer(model: nn.Module) -> optim.LBFGS:
@@ -155,11 +155,15 @@ def make_splicing_closures(
         optimizer: optim.Optimizer,
         coverage: torch.Tensor,
         design_matrix: torch.Tensor,
+        regularization_coefficients_lfc: Optional[torch.Tensor] = None,
 ) -> tuple[Callable[[], torch.Tensor], Callable[[], torch.Tensor]]:
     coverage_loss_fn = CoverageLoss(num_position_coverage=coverage.shape[2]).to(coverage.device)
 
     def _compute_loss() -> torch.Tensor:
-        return coverage_loss_fn(model(design_matrix), coverage)
+        loss = coverage_loss_fn(model(design_matrix), coverage)
+        if regularization_coefficients_lfc is not None:
+            loss += torch.sum(regularization_coefficients_lfc * torch.square(model.lfc))
+        return loss
 
     def closure() -> torch.Tensor:
         optimizer.zero_grad()
@@ -484,6 +488,8 @@ def get_splicing_model_results(
 
         chi2_stat = 2 * (results_reduced.final_loss - results_full.final_loss)
         test_result = lrt_row.to_dict()
+        test_result['tested_parameter'] = 'lfc'
+        test_result['intron_name'] = None
         test_result['lfc'] = lfc_positive - lfc_negative
         test_result['loss_full_model'] = results_full.final_loss
         test_result['loss_reduced_model'] = results_reduced.final_loss
@@ -493,4 +499,44 @@ def get_splicing_model_results(
         test_result['training_converged_within_max_epochs_reduced_model'] = results_reduced.converged_within_max_epochs
         test_results_list.append(test_result)
 
-    return model_param_df, pd.DataFrame(test_results_list)
+    return model_param_df, pd.DataFrame(test_results_list), model_full.state_dict()
+
+
+def get_regularized_splicing_model_results(
+        gene_data: GeneData,
+        dataset_metadata: DatasetMetadata,
+        hot_start_state_dict: StateDict,
+        regularization_coefficients_df: pd.DataFrame,
+        device: str = 'cpu',
+) -> pd.DataFrame:
+    coverage = gene_data.coverage.to(device)
+    dataset_metadata = dataset_metadata.to(device)
+    regularization_coefficients_df = regularization_coefficients_df.set_index(['parameter_type', 'feature_name'])
+
+    model_regularized = SplicingModel(
+        feature_names=dataset_metadata.feature_names,
+        intron_names=gene_data.intron_names,
+    ).to(device)
+    model_regularized.load_state_dict(hot_start_state_dict)
+
+    regularization_coefficients_lfc = torch.zeros((len(dataset_metadata.feature_names), 1)).to(device)
+    for feature_index, feature_name in enumerate(dataset_metadata.feature_names):
+        regularization_coefficients_lfc[feature_index] = regularization_coefficients_df.loc[
+            ('lfc', feature_name)]['lambda']
+
+    optimizer_regularized = make_lbfgs_optimizer(model_regularized)
+    closure_regularized, evaluate_loss_regularized = make_splicing_closures(
+        model_regularized, optimizer_regularized, coverage, dataset_metadata.design_matrix,
+        regularization_coefficients_lfc=regularization_coefficients_lfc,
+    )
+    model_regularized, training_results_regularized = train_model(
+        model_regularized, optimizer_regularized, closure_regularized, evaluate_loss_regularized,
+    )
+
+    model_param_df = model_regularized.get_param_df()
+    model_param_df['gene_name'] = gene_data.gene_name
+    model_param_df['loss_regularized_model'] = training_results_regularized.final_loss
+    model_param_df['training_diverged_regularized_model'] = training_results_regularized.training_diverged
+    model_param_df[
+        'training_converged_within_max_epochs_regularized_model'] = training_results_regularized.converged_within_max_epochs
+    return model_param_df

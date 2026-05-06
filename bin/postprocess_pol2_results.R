@@ -1,25 +1,50 @@
 #!/usr/bin/env Rscript
 
-library(tidyverse)
 library(argparse)
-
+library(tidyverse)
 
 parser <- ArgumentParser()
 parser$add_argument("--test_results",
                     required = TRUE,
-                    help = "Path to the TSV file with LRTs results.")
-parser$add_argument("--output_folder", default = '.')
+                    help = "Path to the TSV file with raw test results (output of merge_regularization.R).")
+parser$add_argument("--output_folder",
+                    default = '.',
+                    help = 'Path to output folder')
 
 args <- parser$parse_args()
 
-test_results <- read_tsv(args$test_results)
+output_folder <- args$output_folder
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder, recursive = TRUE)
+}
+
+test_results <- read_tsv(args$test_results) |>
+  mutate(
+    parameter_type = case_when(
+      tested_parameter == "alpha" ~ "gene_expression",
+      tested_parameter == "beta" ~ "elongation_speed",
+      tested_parameter == "gamma" ~ "splicing_speed",
+      TRUE ~ tested_parameter
+    ),
+    lfc = if_else(parameter_type == "splicing_speed", -lfc, lfc),
+    lfc_regularized = if_else(parameter_type == "splicing_speed", -lfc_regularized, lfc_regularized),
+    l2fc_unregularized = lfc / log(2),
+    l2fc_regularized = lfc_regularized / log(2),
+  ) |>
+  select(-tested_parameter) |>
+  rename(lfc_unregularized = lfc) |>
+  select(gene_name, intron_name, parameter_type, variable, group_1, group_2,
+         l2fc_unregularized, l2fc_regularized, p_value, chi2_test_statistics,
+         test_id, test_type, everything())
+
+write_tsv(test_results, file.path(output_folder, 'test_results.tsv'))
 
 min_p_value <- 1e-20
 fdr_threshold <- 0.05
 l2fc_clamp_value <- 5
 
 for (plot_parameter_type in unique(test_results$parameter_type)) {
-  output_subfolder <- file.path(args$output_folder, plot_parameter_type)
+  output_subfolder <- file.path(output_folder, 'volcano_plots', plot_parameter_type)
   if (!dir.exists(output_subfolder)) {
     dir.create(output_subfolder, recursive = TRUE)
   }
@@ -99,8 +124,5 @@ for (plot_parameter_type in unique(test_results$parameter_type)) {
            width = 10,
            height = 8,
            dpi = 300)
-
   }
 }
-
-
