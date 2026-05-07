@@ -9,14 +9,12 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-
-
 from pol_ii_speed_modeling.load_dataset import load_dataset_metadata
 from pol_ii_speed_modeling.train import get_splicing_model_results
 
 # --- Dev block: comment out when running via Nextflow ---
-results_folder = Path('/home/jakub/Desktop/c_elegans_test/results/')
-model_run_timestamp = 'model_run_26_Apr_2026_11_47_29'
+# results_folder = Path('/home/jakub/Desktop/c_elegans_test/results/')
+# model_run_timestamp = 'model_run_26_Apr_2026_11_47_29'
 # sys.argv = [
 #     'fit_global_splicing_model.py',
 #     '--modeled_introns', str(results_folder / f'modeling/{model_run_timestamp}/modeled_genes/modeled_introns.tsv'),

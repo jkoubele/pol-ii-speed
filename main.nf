@@ -95,6 +95,7 @@ workflow {
             modelable_genes,
             modelable_introns,
             params.fit_pol_2_model,
+            params.fit_intron_specific_pol_2_model,
             params.fit_global_splicing_model,
             params.fit_gene_specific_splicing_model,
             params.fit_intron_specific_splicing_model
