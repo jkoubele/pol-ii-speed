@@ -27,6 +27,7 @@ custom_gene_list: null # Optional path to a CSV file with genes to fit the model
 design_formula: "~your+design+formula" # Design formula, specified as formulas in R.
 
 fit_pol_2_model: true
+fit_intron_specific_pol_2_model: false
 fit_global_splicing_model: true
 fit_gene_specific_splicing_model: false
 fit_intron_specific_splicing_model: false

@@ -87,7 +87,8 @@ process FitModel {
         path(intron_counts_matrix),
         path(library_size_factors),
         path(isoform_length_factors),
-        path(coverage_parquet_files)
+        path(coverage_parquet_files),
+        val(intron_specific_lfc)
     )
 
     output:
@@ -111,7 +112,7 @@ process FitModel {
     --coverage_data_folder . \
     --lrt_metadata ${lrt_metadata} \
     --reduced_matrices_folder ${reduced_matrices_folder} \
-    --intron_specific_lfc False \
+    --intron_specific_lfc ${intron_specific_lfc} \
     --output_folder . \
     --output_name_suffix _${chunk_name}
     """
@@ -395,6 +396,63 @@ workflow pol2_model_subworkflow {
             .combine(isoform_length_factors)
             // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
             .combine(coverage_files.map { file_list -> tuple([file_list]) })
+            .map { it + [false] }
+
+        def fit_model_output = FitModel(model_input)
+
+        def model_result_merged = MergeModelResultChunks(
+            fit_model_output.model_parameters_chunk.collect(),
+            fit_model_output.test_results_chunk.collect(),
+            model_subfolder
+        )
+
+        def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters, model_subfolder)
+
+        def fit_regularized_model_output = FitRegularizedModel(
+            fit_model_output.cache_for_regularization
+                .combine(adaptive_shrinkage_out.regularization_coefficients)
+        )
+
+        def merge_regularization_output = MergeRegularization(
+            model_result_merged.test_results_before_regularization,
+            fit_regularized_model_output.regularized_model_parameters_chunk.collect(),
+            model_subfolder
+        )
+
+        PostprocessPol2ResultsAndPlot(merge_regularization_output.raw_test_results, model_subfolder)
+}
+
+
+workflow intron_specific_pol2_model_subworkflow {
+    take:
+        gene_names_chunks
+        modeled_introns
+        design_matrix
+        lrt_metadata
+        reduced_design_matrices
+        exon_counts
+        intron_counts
+        library_size_factors
+        isoform_length_factors
+        coverage_files
+
+    main:
+        def model_subfolder = 'intron_specific_pol_2_model'
+
+        def model_input = gene_names_chunks
+            .flatten()
+            .map{ file -> tuple(file, file.baseName)}
+            .combine(modeled_introns)
+            .combine(design_matrix)
+            .combine(lrt_metadata)
+            .combine(reduced_design_matrices)
+            .combine(exon_counts)
+            .combine(intron_counts)
+            .combine(library_size_factors)
+            .combine(isoform_length_factors)
+            // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
+            .combine(coverage_files.map { file_list -> tuple([file_list]) })
+            .map { it + [true] }
 
         def fit_model_output = FitModel(model_input)
 
@@ -537,6 +595,7 @@ workflow modeling_workflow {
         modelable_genes_input
         modelable_introns_input
         fit_pol_2_model
+        fit_intron_specific_pol_2_model
         fit_global_splicing_model
         fit_gene_specific_splicing_model
         fit_intron_specific_splicing_model
@@ -560,6 +619,21 @@ workflow modeling_workflow {
 
         if (fit_pol_2_model) {
             pol2_model_subworkflow(
+                modeled_genes.gene_names_chunks,
+                modeled_genes.modeled_introns,
+                design_matrices_data.design_matrix,
+                design_matrices_data.lrt_metadata,
+                design_matrices_data.reduced_design_matrices,
+                exon_counts_input,
+                intron_counts_input,
+                library_size_factors_input,
+                isoform_length_factors_input,
+                coverage_files_input
+            )
+        }
+
+        if (fit_intron_specific_pol_2_model) {
+            intron_specific_pol2_model_subworkflow(
                 modeled_genes.gene_names_chunks,
                 modeled_genes.modeled_introns,
                 design_matrices_data.design_matrix,
