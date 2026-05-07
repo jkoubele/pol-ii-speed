@@ -92,9 +92,12 @@ workflow {
             coverage_files,
             params.design_formula,
             lrt_contrasts,
-            params.intron_specific_lfc,
             modelable_genes,
-            modelable_introns
+            modelable_introns,
+            params.fit_pol_2_model,
+            params.fit_global_splicing_model,
+            params.fit_gene_specific_splicing_model,
+            params.fit_intron_specific_splicing_model
         )
     }
 }

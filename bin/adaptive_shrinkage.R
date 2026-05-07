@@ -15,7 +15,8 @@ parser$add_argument("--output_folder", default = ".",
 
 args <- parser$parse_args()
 
-model_parameters <- read_tsv(args$model_parameters)
+model_parameters <- read_tsv(args$model_parameters) |>
+  filter(!is.na(feature_name))
 
 regularization_coefficients_df <- tibble(
   parameter_type = character(),
@@ -24,7 +25,7 @@ regularization_coefficients_df <- tibble(
   lambda = double()
 )
 
-for (parameter in c('beta', 'gamma')) {
+for (parameter in unique(model_parameters$parameter_type)) {
   df_parameter <- model_parameters |> filter(parameter_type == parameter)
   for (feature in unique(df_parameter$feature_name)) {
     df_feature <- df_parameter |>
@@ -36,11 +37,12 @@ for (parameter in c('beta', 'gamma')) {
              SE > 0)
 
     if (nrow(df_feature) == 0) {
-      stop(sprintf(
-        "No parameter LFC and SE available for parameter_type='%s', feature_name='%s'; cannot perform adaptive shrinkage.",
+      message(sprintf(
+        "Warning: no identifiable entries with finite SE for parameter_type='%s', feature_name='%s'; skipping.",
         parameter,
         feature
       ))
+      next
     }
 
     ash_results <- ash(betahat = df_feature$value, sebetahat = df_feature$SE)

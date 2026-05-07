@@ -8,17 +8,7 @@ import torch
 from tqdm import tqdm
 
 from pol_ii_speed_modeling.load_dataset import load_dataset_metadata, load_gene_data_list
-from pol_ii_speed_modeling.train import get_model_results, CacheForRegularization, StateDict
-
-
-def parse_bool_in_argparse(argument: str) -> bool:
-    if argument.lower() == 'true':
-        return True
-    elif argument.lower() == 'false':
-        return False
-    else:
-        raise argparse.ArgumentTypeError("Boolean value expected. Use either 'true' or 'false'.")
-
+from pol_ii_speed_modeling.train import get_splicing_model_results, CacheForRegularization, StateDict
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -62,10 +52,6 @@ if __name__ == "__main__":
                         type=Path,
                         required=True,
                         help='Folder with TSV files with reduced matrices for LRT.')
-    parser.add_argument('--intron_specific_lfc',
-                        type=parse_bool_in_argparse,
-                        required=True,
-                        help='Whether to use intron-specific LFC (true or false).')
     parser.add_argument('--output_folder',
                         type=Path,
                         default=Path('.'),
@@ -76,40 +62,52 @@ if __name__ == "__main__":
                         help='Suffix for the output TSV files.')
     args = parser.parse_args()
 
-    output_folder = args.output_folder
-    output_folder.mkdir(exist_ok=True, parents=True)
-    dataset_metadata = load_dataset_metadata(design_matrix_file=args.design_matrix,
-                                             library_size_factors_file=args.library_size_factors,
-                                             lrt_metadata_file=args.lrt_metadata,
-                                             reduced_matrices_folder=args.reduced_matrices_folder)
+    args.output_folder.mkdir(exist_ok=True, parents=True)
 
-    gene_data_list = load_gene_data_list(modeled_genes_file=args.modeled_genes,
-                                         modeled_introns_file=args.modeled_introns,
-                                         exon_counts_file=args.exon_counts,
-                                         intron_counts_file=args.intron_counts,
-                                         isoform_length_factors_file=args.isoform_length_factors,
-                                         coverage_folder=args.coverage_data_folder,
-                                         sample_names=dataset_metadata.sample_names)
+    dataset_metadata = load_dataset_metadata(
+        design_matrix_file=args.design_matrix,
+        library_size_factors_file=args.library_size_factors,
+        lrt_metadata_file=args.lrt_metadata,
+        reduced_matrices_folder=args.reduced_matrices_folder,
+    )
 
-    result_list = [get_model_results(gene_data=gene_data,
-                                     dataset_metadata=dataset_metadata,
-                                     intron_specific_lfc=args.intron_specific_lfc)
-                   for gene_data in tqdm(gene_data_list)]
+    gene_data_list = load_gene_data_list(
+        modeled_genes_file=args.modeled_genes,
+        modeled_introns_file=args.modeled_introns,
+        exon_counts_file=args.exon_counts,
+        intron_counts_file=args.intron_counts,
+        isoform_length_factors_file=args.isoform_length_factors,
+        coverage_folder=args.coverage_data_folder,
+        sample_names=dataset_metadata.sample_names,
+    )
 
-    model_params_list: list[pd.DataFrame] = [result[0] for result in result_list]
-    test_results_list: list[pd.DataFrame] = [result[1] for result in result_list]
-    state_dicts_list: list[StateDict] = [result[2] for result in result_list]
+    model_params_list: list[pd.DataFrame] = []
+    test_results_list: list[pd.DataFrame] = []
+    state_dicts_list: list[StateDict] = []
 
-    all_model_param_df = pd.concat([result[0] for result in result_list]).reset_index(drop=True)
-    all_test_results_df = pd.concat([result[1] for result in result_list]).reset_index(drop=True)
+    for gene_data in tqdm(gene_data_list):
+        model_param_df, test_results_df, state_dict = get_splicing_model_results(
+            coverage=gene_data.coverage,
+            dataset_metadata=dataset_metadata,
+            intron_names=gene_data.intron_names,
+        )
+        model_param_df = model_param_df.reset_index(drop=True)
+        model_param_df['gene_name'] = gene_data.gene_name
+        test_results_df['gene_name'] = gene_data.gene_name
+        model_params_list.append(model_param_df)
+        test_results_list.append(test_results_df)
+        state_dicts_list.append(state_dict)
 
-    all_model_param_df.to_csv(output_folder / f"model_parameters{args.output_name_suffix}.tsv", sep='\t', index=False)
-    all_test_results_df.to_csv(output_folder / f"test_results{args.output_name_suffix}.tsv", sep='\t', index=False)
+    pd.concat(model_params_list).reset_index(drop=True).to_csv(
+        args.output_folder / f'model_parameters{args.output_name_suffix}.tsv', sep='\t', index=False
+    )
+    pd.concat(test_results_list).reset_index(drop=True).to_csv(
+        args.output_folder / f'test_results{args.output_name_suffix}.tsv', sep='\t', index=False
+    )
 
     cache_for_regularization = CacheForRegularization(
         training_input_per_gene=list(zip(gene_data_list, state_dicts_list)),
         dataset_metadata=dataset_metadata,
-        intron_specific_lfc=args.intron_specific_lfc
     )
     torch.save(cache_for_regularization,
-               f"cache_for_regularization{args.output_name_suffix}.pt")
+               args.output_folder / f'cache_for_regularization{args.output_name_suffix}.pt')
