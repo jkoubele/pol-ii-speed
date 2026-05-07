@@ -17,6 +17,21 @@ def safe_exp(x: torch.Tensor, output_threshold: float = 1e20) -> torch.Tensor:
 
 
 @dataclass
+class IntronData:
+    intron_name: str
+    gene_name: str
+    coverage: torch.Tensor  # shape (num_samples, 1, num_coverage_bins)
+
+    @property
+    def intron_names(self) -> list[str]:
+        return [self.intron_name]
+
+    def to(self, device):
+        self.coverage = self.coverage.to(device)
+        return self
+
+
+@dataclass
 class GeneData:
     gene_name: str
     intron_names: list[str]

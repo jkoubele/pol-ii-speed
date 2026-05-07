@@ -57,6 +57,7 @@ process GetModeledGenes {
 
     output:
     path("gene_chunks/modeled_genes_chunk_*.tsv"), emit: gene_names_chunks
+    path("intron_chunks/modeled_introns_chunk_*.tsv"), emit: intron_chunks
     path("modeled_genes.tsv")
     path("modeled_introns.tsv"), emit: modeled_introns
 
@@ -68,8 +69,7 @@ process GetModeledGenes {
     --input_gene_names $gene_names \
     --modelable_genes $modelable_genes \
     --modelable_introns $modelable_introns \
-    --output_folder . \
-    --chunk_size 100
+    --output_folder .
     """
 }
 
@@ -150,6 +150,38 @@ process FitGeneSplicingModel {
     --intron_counts $intron_counts_matrix \
     --library_size_factors $library_size_factors \
     --isoform_length_factors $isoform_length_factors \
+    --coverage_data_folder . \
+    --lrt_metadata ${lrt_metadata} \
+    --reduced_matrices_folder ${reduced_matrices_folder} \
+    --output_folder . \
+    --output_name_suffix _${chunk_name}
+    """
+}
+
+process FitIntronSplicingModel {
+    input:
+    tuple(
+        path(modeled_introns),
+        val(chunk_name),
+        path(design_matrix),
+        path(lrt_metadata),
+        path(reduced_matrices_folder),
+        path(library_size_factors),
+        path(coverage_parquet_files)
+    )
+
+    output:
+    path("model_parameters*.tsv"), emit: model_parameters_chunk
+    path("test_results*.tsv"), emit: test_results_chunk
+    tuple path("cache_for_regularization*.pt"), val(chunk_name), emit: cache_for_regularization
+
+    script:
+    """
+    export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
+    fit_intron_specific_splicing_model.py \
+    --modeled_introns $modeled_introns \
+    --design_matrix $design_matrix \
+    --library_size_factors $library_size_factors \
     --coverage_data_folder . \
     --lrt_metadata ${lrt_metadata} \
     --reduced_matrices_folder ${reduced_matrices_folder} \
@@ -444,6 +476,53 @@ workflow gene_specific_splicing_model_subworkflow {
 }
 
 
+workflow intron_specific_splicing_model_subworkflow {
+    take:
+        intron_chunks
+        design_matrix
+        lrt_metadata
+        reduced_design_matrices
+        library_size_factors
+        coverage_files
+
+    main:
+        def model_subfolder = 'intron_specific_splicing_model'
+
+        def model_input = intron_chunks
+            .flatten()
+            .map{ file -> tuple(file, file.baseName)}
+            .combine(design_matrix)
+            .combine(lrt_metadata)
+            .combine(reduced_design_matrices)
+            .combine(library_size_factors)
+            // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
+            .combine(coverage_files.map { file_list -> tuple([file_list]) })
+
+        def fit_model_output = FitIntronSplicingModel(model_input)
+
+        def model_result_merged = MergeModelResultChunks(
+            fit_model_output.model_parameters_chunk.collect(),
+            fit_model_output.test_results_chunk.collect(),
+            model_subfolder
+        )
+
+        def adaptive_shrinkage_out = AdaptiveShrinkage(model_result_merged.model_parameters, model_subfolder)
+
+        def fit_regularized_model_output = FitRegularizedSplicingModel(
+            fit_model_output.cache_for_regularization
+                .combine(adaptive_shrinkage_out.regularization_coefficients)
+        )
+
+        def merge_regularization_output = MergeRegularization(
+            model_result_merged.test_results_before_regularization,
+            fit_regularized_model_output.regularized_model_parameters_chunk.collect(),
+            model_subfolder
+        )
+
+        PostprocessSplicingResultsAndPlot(merge_regularization_output.raw_test_results, model_subfolder)
+}
+
+
 workflow modeling_workflow {
     take:
         samplesheet_input
@@ -460,6 +539,7 @@ workflow modeling_workflow {
         fit_pol_2_model
         fit_global_splicing_model
         fit_gene_specific_splicing_model
+        fit_intron_specific_splicing_model
 
     main:
         def samplesheet = Channel.value(file(samplesheet_input))
@@ -504,6 +584,17 @@ workflow modeling_workflow {
                 intron_counts_input,
                 library_size_factors_input,
                 isoform_length_factors_input,
+                coverage_files_input
+            )
+        }
+
+        if (fit_intron_specific_splicing_model) {
+            intron_specific_splicing_model_subworkflow(
+                modeled_genes.intron_chunks,
+                design_matrices_data.design_matrix,
+                design_matrices_data.lrt_metadata,
+                design_matrices_data.reduced_design_matrices,
+                library_size_factors_input,
                 coverage_files_input
             )
         }

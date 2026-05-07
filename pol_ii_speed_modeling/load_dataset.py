@@ -5,7 +5,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata
+from pol_ii_speed_modeling.pol_ii_model import GeneData, IntronData, DatasetMetadata
 
 
 def load_dataset_metadata(design_matrix_file: Path,
@@ -108,3 +108,29 @@ def load_gene_data_list(modeled_genes_file: Path,
         gene_data_list.append(gene_data)
 
     return gene_data_list
+
+
+def load_intron_coverage_list(
+        modeled_introns_file: Path,
+        coverage_folder: Path,
+        sample_names: list[str],
+) -> list[IntronData]:
+    introns_df = pd.read_csv(modeled_introns_file, sep='\t')
+
+    coverage_df_by_sample: dict[str, pd.DataFrame] = {}
+    for sample_name in tqdm(sample_names, desc='Loading coverage data'):
+        coverage_df = pd.read_parquet(coverage_folder / f'{sample_name}.parquet')
+        coverage_df = coverage_df.set_index('intron_name')
+        coverage_df_by_sample[sample_name] = coverage_df
+
+    intron_data_list: list[IntronData] = []
+    for _, row in tqdm(introns_df.iterrows(), total=len(introns_df), desc='Preparing intron data'):
+        intron_id = row['intron_id']
+        gene_id = row['gene_id']
+        coverage = torch.tensor(np.stack([
+            coverage_df_by_sample[sample].loc[intron_id].values
+            for sample in sample_names
+        ]), dtype=torch.float32).unsqueeze(1)  # (num_samples, 1, num_coverage_bins)
+        intron_data_list.append(IntronData(intron_name=intron_id, gene_name=gene_id, coverage=coverage))
+
+    return intron_data_list

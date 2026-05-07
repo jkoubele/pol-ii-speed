@@ -8,8 +8,8 @@ from torch import nn, optim
 from torch.func import functional_call, hessian
 from typing import Callable, Optional, OrderedDict
 
-from pol_ii_speed_modeling.pol_ii_model import GeneData, DatasetMetadata, Pol2TotalLoss, Pol2Model, TestableParameters, \
-    LRTSpecification, SplicingModel, CoverageLoss
+from pol_ii_speed_modeling.pol_ii_model import GeneData, IntronData, DatasetMetadata, Pol2TotalLoss, Pol2Model, \
+    TestableParameters, LRTSpecification, SplicingModel, CoverageLoss
 
 LOSS_CLAMP_VALUE = 1e30
 
@@ -29,7 +29,8 @@ class TrainingResults:
 class CacheForRegularization:
     training_input_per_gene: list[tuple[GeneData, StateDict]]
     dataset_metadata: DatasetMetadata
-    intron_specific_lfc: Optional[bool] = None
+    intron_specific_lfc: Optional[bool] = None  # Pol2 model only
+    intron_specific_splicing: bool = False
 
 
 def make_lbfgs_optimizer(model: nn.Module) -> optim.LBFGS:
@@ -503,19 +504,19 @@ def get_splicing_model_results(
 
 
 def get_regularized_splicing_model_results(
-        gene_data: GeneData,
+        input_data: GeneData | IntronData,
         dataset_metadata: DatasetMetadata,
         hot_start_state_dict: StateDict,
         regularization_coefficients_df: pd.DataFrame,
         device: str = 'cpu',
 ) -> pd.DataFrame:
-    coverage = gene_data.coverage.to(device)
+    coverage = input_data.coverage.to(device)
     dataset_metadata = dataset_metadata.to(device)
     regularization_coefficients_df = regularization_coefficients_df.set_index(['parameter_type', 'feature_name'])
 
     model_regularized = SplicingModel(
         feature_names=dataset_metadata.feature_names,
-        intron_names=gene_data.intron_names,
+        intron_names=input_data.intron_names,
     ).to(device)
     model_regularized.load_state_dict(hot_start_state_dict)
 
@@ -534,7 +535,7 @@ def get_regularized_splicing_model_results(
     )
 
     model_param_df = model_regularized.get_param_df()
-    model_param_df['gene_name'] = gene_data.gene_name
+    model_param_df['gene_name'] = input_data.gene_name
     model_param_df['loss_regularized_model'] = training_results_regularized.final_loss
     model_param_df['training_diverged_regularized_model'] = training_results_regularized.training_diverged
     model_param_df[

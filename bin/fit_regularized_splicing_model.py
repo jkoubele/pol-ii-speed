@@ -39,16 +39,18 @@ if __name__ == "__main__":
                                           map_location=device)
     dataset_metadata = cache_for_regularization.dataset_metadata
 
-    regularized_model_params_list: list[pd.DataFrame] = [
-        get_regularized_splicing_model_results(
-            gene_data=gene_data,
+    regularized_model_params_list = []
+    for input_data, model_state_dict in tqdm(cache_for_regularization.training_input_per_gene):
+        model_param_df = get_regularized_splicing_model_results(
+            input_data=input_data,
             dataset_metadata=dataset_metadata,
             hot_start_state_dict=model_state_dict,
             regularization_coefficients_df=regularization_coefficients_df,
             device=device,
         )
-        for gene_data, model_state_dict in tqdm(cache_for_regularization.training_input_per_gene)
-    ]
+        if cache_for_regularization.intron_specific_splicing:
+            model_param_df.loc[model_param_df['parameter_type'] == 'lfc', 'intron_name'] = input_data.intron_name
+        regularized_model_params_list.append(model_param_df)
 
     pd.concat(regularized_model_params_list).reset_index(drop=True).to_csv(
         args.output_folder / f'regularized_model_parameters{args.output_name_suffix}.tsv',
