@@ -422,6 +422,7 @@ def get_splicing_model_results(
         intron_names: list[str],
         device: str = 'cpu',
         verbose: bool = False,
+        compute_wald_test: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     coverage = coverage.to(device)
     dataset_metadata = dataset_metadata.to(device)
@@ -450,8 +451,9 @@ def get_splicing_model_results(
         pi = functional_call(model_full, params, (dataset_metadata.design_matrix,))
         return coverage_loss_fn(pi, coverage)
 
-    fisher_information_matrix = get_fisher_information_matrix(model_full, splicing_loss_by_params)
-    model_param_df = add_wald_test_results(model_param_df, fisher_information_matrix)
+    if compute_wald_test:
+        fisher_information_matrix = get_fisher_information_matrix(model_full, splicing_loss_by_params)
+        model_param_df = add_wald_test_results(model_param_df, fisher_information_matrix)
     model_param_df = model_param_df.set_index(['parameter_type', 'feature_name', 'intron_name'], drop=False)
 
     test_results_list: list[dict] = []

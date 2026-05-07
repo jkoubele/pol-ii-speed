@@ -90,6 +90,7 @@ if __name__ == "__main__":
         dataset_metadata=dataset_metadata,
         intron_names=intron_names,
         verbose=True,
+        compute_wald_test=False,
     )
 
     model_param_df.reset_index(drop=True).to_csv(
