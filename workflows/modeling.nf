@@ -58,7 +58,7 @@ process GetModeledGenes {
     output:
     path("gene_chunks/modeled_genes_chunk_*.tsv"), emit: gene_names_chunks
     path("intron_chunks/modeled_introns_chunk_*.tsv"), emit: intron_chunks
-    path("modeled_genes.tsv")
+    path("modeled_genes.tsv"), emit: modeled_genes
     path("modeled_introns.tsv"), emit: modeled_introns
 
     publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/modeled_genes", mode: 'copy'
@@ -218,6 +218,44 @@ process FitGlobalSplicingModel {
     --lrt_metadata ${lrt_metadata} \
     --reduced_matrices_folder ${reduced_matrices_folder} \
     --coverage_data_folder .
+    """
+}
+
+process FitGlobalPol2Model {
+    input:
+    tuple(
+        path(modeled_genes),
+        path(modeled_introns),
+        path(design_matrix),
+        path(lrt_metadata),
+        path(reduced_matrices_folder),
+        path(exon_counts_matrix),
+        path(intron_counts_matrix),
+        path(library_size_factors),
+        path(isoform_length_factors),
+        path(coverage_parquet_files)
+    )
+
+    output:
+    path("model_parameters.tsv"), emit: model_parameters
+    path("test_results.tsv"), emit: test_results
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/global_pol2_model", mode: 'copy'
+
+    script:
+    """
+    export PYTHONPATH='${baseDir}'\${PYTHONPATH:+:\$PYTHONPATH}
+    fit_global_pol2_model.py \
+    --modeled_genes $modeled_genes \
+    --modeled_introns $modeled_introns \
+    --design_matrix $design_matrix \
+    --exon_counts $exon_counts_matrix \
+    --intron_counts $intron_counts_matrix \
+    --library_size_factors $library_size_factors \
+    --isoform_length_factors $isoform_length_factors \
+    --coverage_data_folder . \
+    --lrt_metadata ${lrt_metadata} \
+    --reduced_matrices_folder ${reduced_matrices_folder}
     """
 }
 
@@ -581,6 +619,36 @@ workflow intron_specific_splicing_model_subworkflow {
 }
 
 
+workflow global_pol2_model_subworkflow {
+    take:
+        modeled_genes
+        modeled_introns
+        design_matrix
+        lrt_metadata
+        reduced_design_matrices
+        exon_counts
+        intron_counts
+        library_size_factors
+        isoform_length_factors
+        coverage_files
+
+    main:
+        FitGlobalPol2Model(
+            modeled_genes
+                .combine(modeled_introns)
+                .combine(design_matrix)
+                .combine(lrt_metadata)
+                .combine(reduced_design_matrices)
+                .combine(exon_counts)
+                .combine(intron_counts)
+                .combine(library_size_factors)
+                .combine(isoform_length_factors)
+                // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
+                .combine(coverage_files.map { file_list -> tuple([file_list]) })
+        )
+}
+
+
 workflow modeling_workflow {
     take:
         samplesheet_input
@@ -596,6 +664,7 @@ workflow modeling_workflow {
         modelable_introns_input
         fit_pol_2_model
         fit_intron_specific_pol_2_model
+        fit_global_pol2_model
         fit_global_splicing_model
         fit_gene_specific_splicing_model
         fit_intron_specific_splicing_model
@@ -635,6 +704,21 @@ workflow modeling_workflow {
         if (fit_intron_specific_pol_2_model) {
             intron_specific_pol2_model_subworkflow(
                 modeled_genes.gene_names_chunks,
+                modeled_genes.modeled_introns,
+                design_matrices_data.design_matrix,
+                design_matrices_data.lrt_metadata,
+                design_matrices_data.reduced_design_matrices,
+                exon_counts_input,
+                intron_counts_input,
+                library_size_factors_input,
+                isoform_length_factors_input,
+                coverage_files_input
+            )
+        }
+
+        if (fit_global_pol2_model) {
+            global_pol2_model_subworkflow(
+                modeled_genes.modeled_genes,
                 modeled_genes.modeled_introns,
                 design_matrices_data.design_matrix,
                 design_matrices_data.lrt_metadata,

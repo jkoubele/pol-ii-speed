@@ -9,7 +9,8 @@ from torch.func import functional_call, hessian
 from typing import Callable, Optional, OrderedDict
 
 from pol_ii_speed_modeling.pol_ii_model import GeneData, IntronData, DatasetMetadata, Pol2TotalLoss, Pol2Model, \
-    TestableParameters, LRTSpecification, SplicingModel, CoverageLoss
+    TestableParameters, LRTSpecification, SplicingModel, CoverageLoss, \
+    GlobalGeneData, GlobalPol2Model
 
 LOSS_CLAMP_VALUE = 1e30
 
@@ -194,8 +195,8 @@ def flatten_hessian_dict(hessian_dict, model_parameters):
             block = hessian_dict[param_1][param_2].detach()
             block = block.reshape(param_sizes[param_1], param_sizes[param_2])
             hessian_matrix[
-            param_offsets[param_1]:param_offsets[param_1] + param_sizes[param_1],
-            param_offsets[param_2]:param_offsets[param_2] + param_sizes[param_2]
+                param_offsets[param_1]:param_offsets[param_1] + param_sizes[param_1],
+                param_offsets[param_2]:param_offsets[param_2] + param_sizes[param_2]
             ] = block
 
     return hessian_matrix
@@ -265,7 +266,7 @@ def get_model_results(gene_data: GeneData,
     model_full = Pol2Model(feature_names=dataset_metadata.feature_names,
                            intron_names=gene_data.intron_names,
                            intron_specific_lfc=intron_specific_lfc).to(device)
-    model_full.initialize_intercepts(gene_data, dataset_metadata.library_sizes)
+    model_full.initialize_parameters(gene_data, dataset_metadata.library_sizes, dataset_metadata.design_matrix)
 
     optimizer_full = make_lbfgs_optimizer(model_full)
     closure_full, evaluate_loss_full = _make_pol2_closures(
@@ -438,7 +439,7 @@ def get_splicing_model_results(
         model_full, optimizer_full, coverage, dataset_metadata.design_matrix,
     )
     model_full, results_full = train_model(model_full, optimizer_full, closure_full, evaluate_loss_full,
-                                            verbose=verbose)
+                                           verbose=verbose)
 
     model_param_df = model_full.get_param_df()
     model_param_df['loss_full_model'] = results_full.final_loss
@@ -500,9 +501,153 @@ def get_splicing_model_results(
         test_result['p_value'] = 1 - stats.chi2.cdf(chi2_stat, df=lrt_row['lrt_df'])
         test_result['training_diverged_reduced_model'] = results_reduced.training_diverged
         test_result['training_converged_within_max_epochs_reduced_model'] = results_reduced.converged_within_max_epochs
+        test_result['num_epochs_full_model'] = results_full.num_epochs
+        test_result['num_epochs_reduced_model'] = results_reduced.num_epochs
         test_results_list.append(test_result)
 
     return model_param_df, pd.DataFrame(test_results_list), model_full.state_dict()
+
+
+def make_global_pol2_closures(
+        model: GlobalPol2Model,
+        optimizer: optim.Optimizer,
+        global_gene_data: GlobalGeneData,
+        dataset_metadata: DatasetMetadata,
+        reduced_matrix: Optional[torch.Tensor] = None,
+) -> tuple[Callable[[], torch.Tensor], Callable[[], torch.Tensor]]:
+    pol_2_total_loss = Pol2TotalLoss().to(next(model.parameters()).device)
+
+    def _compute_loss() -> torch.Tensor:
+        predicted_reads_exon, predicted_reads_intron, pi = model(
+            design_matrix=dataset_metadata.design_matrix,
+            log_library_sizes=dataset_metadata.log_library_sizes,
+            isoform_length_offset=global_gene_data.isoform_length_offset,
+            reduced_design_matrix=reduced_matrix,
+        )
+        return pol_2_total_loss(
+            reads_exon=global_gene_data.exon_reads,
+            reads_introns=global_gene_data.intron_reads,
+            coverage=global_gene_data.coverage,
+            predicted_reads_exon=predicted_reads_exon,
+            predicted_reads_intron=predicted_reads_intron,
+            pi=pi,
+        )
+
+    def closure() -> torch.Tensor:
+        optimizer.zero_grad()
+        loss = _compute_loss()
+        if not torch.isfinite(loss):
+            return torch.as_tensor(LOSS_CLAMP_VALUE, dtype=loss.dtype, device=loss.device)
+        loss.backward()
+        return loss
+
+    def evaluate_loss() -> torch.Tensor:
+        with torch.no_grad():
+            return _compute_loss()
+
+    return closure, evaluate_loss
+
+
+def get_global_pol2_model_results(
+        global_gene_data: GlobalGeneData,
+        dataset_metadata: DatasetMetadata,
+        device: str = 'cpu',
+        verbose: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    global_gene_data = global_gene_data.to(device)
+    dataset_metadata = dataset_metadata.to(device)
+
+    model = GlobalPol2Model(
+        feature_names=dataset_metadata.feature_names,
+        gene_names=global_gene_data.gene_names,
+        intron_names=global_gene_data.intron_names,
+        gene_idx=global_gene_data.gene_idx,
+    ).to(device)
+    model.initialize_parameters(global_gene_data, dataset_metadata.library_sizes, dataset_metadata.design_matrix)
+
+    optimizer = make_lbfgs_optimizer(model)
+    closure, evaluate_loss = make_global_pol2_closures(model, optimizer, global_gene_data, dataset_metadata)
+    model, training_results = train_model(
+        model, optimizer, closure, evaluate_loss, max_epochs=500, verbose=verbose,
+    )
+
+    feature_names = dataset_metadata.feature_names
+    param_rows: list[dict] = []
+    for param_name in ('beta', 'gamma'):
+        param_val = getattr(model, param_name).detach()
+        for feature_index, feature_name in enumerate(feature_names):
+            param_rows.append({
+                'parameter_type': param_name,
+                'feature_name': feature_name,
+                'intron_name': None,
+                'value': param_val[feature_index].item(),
+                'loss_full_model': training_results.final_loss,
+                'training_diverged_full_model': training_results.training_diverged,
+                'training_converged_within_max_epochs_full_model': training_results.converged_within_max_epochs,
+            })
+    model_param_df = pd.DataFrame(param_rows)
+
+    test_results_list: list[dict] = []
+    for _, lrt_row in dataset_metadata.lrt_metadata.iterrows():
+        reduced_matrix = dataset_metadata.reduced_matrices[lrt_row['test_id']].to(device)
+
+        for tested_parameter in (TestableParameters.BETA, TestableParameters.GAMMA):
+            lrt_spec = LRTSpecification(
+                num_features_reduced_matrix=reduced_matrix.shape[1],
+                tested_parameter=tested_parameter,
+            )
+            model_reduced = GlobalPol2Model(
+                feature_names=feature_names,
+                gene_names=global_gene_data.gene_names,
+                intron_names=global_gene_data.intron_names,
+                gene_idx=global_gene_data.gene_idx,
+                lrt_specification=lrt_spec,
+            ).to(device)
+
+            full_state = model.state_dict()
+            reduced_state = model_reduced.state_dict()
+            for key in full_state:
+                reduced_state[key] = full_state[key]
+
+            if reduced_matrix.shape[1] > 0:
+                full_lfc = model.beta if tested_parameter == TestableParameters.BETA else model.gamma
+                full_contribution = dataset_metadata.design_matrix @ full_lfc.detach()
+                reduced_state['reduced_lfc'] = torch.linalg.lstsq(reduced_matrix, full_contribution).solution
+
+            model_reduced.load_state_dict(reduced_state)
+
+            optimizer_reduced = make_lbfgs_optimizer(model_reduced)
+            closure_reduced, evaluate_loss_reduced = make_global_pol2_closures(
+                model_reduced, optimizer_reduced, global_gene_data, dataset_metadata,
+                reduced_matrix=reduced_matrix,
+            )
+            model_reduced, results_reduced = train_model(
+                model_reduced, optimizer_reduced, closure_reduced, evaluate_loss_reduced, max_epochs=500,
+                verbose=verbose
+            )
+
+            full_lfc_vals = model.beta.detach() if tested_parameter == TestableParameters.BETA else model.gamma.detach()
+            lfc_positive = (0.0 if pd.isna(lrt_row['lfc_column_positive'])
+                            else full_lfc_vals[feature_names.index(lrt_row['lfc_column_positive'])].item())
+            lfc_negative = (0.0 if pd.isna(lrt_row['lfc_column_negative'])
+                            else full_lfc_vals[feature_names.index(lrt_row['lfc_column_negative'])].item())
+
+            chi2_stat = 2 * (results_reduced.final_loss - training_results.final_loss)
+            test_result = lrt_row.to_dict()
+            test_result['tested_parameter'] = tested_parameter
+            test_result['lfc'] = lfc_positive - lfc_negative
+            test_result['loss_full_model'] = training_results.final_loss
+            test_result['loss_reduced_model'] = results_reduced.final_loss
+            test_result['chi2_test_statistics'] = chi2_stat
+            test_result['p_value'] = 1 - stats.chi2.cdf(chi2_stat, df=lrt_row['lrt_df'])
+            test_result['training_diverged_reduced_model'] = results_reduced.training_diverged
+            test_result[
+                'training_converged_within_max_epochs_reduced_model'] = results_reduced.converged_within_max_epochs
+            test_result['num_epochs_full_model'] = training_results.num_epochs
+            test_result['num_epochs_reduced_model'] = results_reduced.num_epochs
+            test_results_list.append(test_result)
+
+    return model_param_df, pd.DataFrame(test_results_list)
 
 
 def get_regularized_splicing_model_results(
