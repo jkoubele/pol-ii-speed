@@ -671,10 +671,33 @@ workflow global_pol2_model_subworkflow {
 }
 
 
+process StratifiedIntronMetacoveragePlots {
+    input:
+    tuple path(coverage_parquet_files), path(introns_bed_file), path(gene_names_csv), path(samplesheet)
+    val design_formula
+
+    output:
+    path("*/*")
+
+    publishDir "${params.outdir}/${modeling_output_subfolder}/${model_run_id}/stratified_intron_metacoverage_plots", mode: 'copy'
+
+    script:
+    """
+    plot_intron_metacoverage.py \
+        --coverage_data_folder . \
+        --introns_bed_file $introns_bed_file \
+        --gene_names $gene_names_csv \
+        --samplesheet $samplesheet \
+        --design_formula "$design_formula"
+    """
+}
+
+
 workflow modeling_workflow {
     take:
         samplesheet_input
         gene_names_file_input
+        introns_bed_file_input
         exon_counts_input
         intron_counts_input
         library_size_factors_input
@@ -693,6 +716,14 @@ workflow modeling_workflow {
 
     main:
         def samplesheet = Channel.value(file(samplesheet_input))
+
+        def stratified_plot_input = coverage_files_input
+            .map { files -> tuple([files]) }
+            .combine(introns_bed_file_input)
+            .combine(gene_names_file_input)
+            .combine(samplesheet)
+
+        StratifiedIntronMetacoveragePlots(stratified_plot_input, design_formula)
 
         def design_metadata = WriteDesignMetadata(design_formula, lrt_contrasts)
 

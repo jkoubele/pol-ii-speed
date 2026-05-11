@@ -515,6 +515,7 @@ workflow preprocessing_workflow {
 
     emit:
         gene_names_file          = genomic_features.protein_coding_gene_names
+        introns_bed_file         = genomic_features.introns_bed_file
         exon_counts              = data_aggregation.exon_counts
         intron_counts            = data_aggregation.intron_counts
         library_size_factors     = data_aggregation.library_size_factors
