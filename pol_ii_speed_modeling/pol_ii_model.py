@@ -323,7 +323,7 @@ class GlobalGeneData:
     intron_reads: torch.Tensor        # (num_samples, num_introns)
     coverage: torch.Tensor            # (num_samples, num_introns, num_bins)
     isoform_length_offset: torch.Tensor  # (num_samples, num_genes)
-    gene_idx: torch.Tensor            # (num_introns,) int64 — maps intron index → gene index
+    gene_idx: torch.Tensor            # (num_introns,) int64 — maps intron index -> gene index
 
     def to(self, device):
         self.exon_reads = self.exon_reads.to(device)
@@ -421,7 +421,7 @@ class GlobalPol2Model(nn.Module):
                 isoform_length_offset: torch.Tensor,
                 reduced_design_matrix: Optional[torch.Tensor] = None):
 
-        gene_expression_term = design_matrix @ self.alpha.T   # (S, G)
+        gene_expression_term = design_matrix @ self.alpha.T   # (num_samples, num_genes)
 
         predicted_log_reads_exon = (
             self.intercept_exon
@@ -446,7 +446,7 @@ class GlobalPol2Model(nn.Module):
                 else (design_matrix @ self.gamma).unsqueeze(1)
             )
 
-        gene_expr_per_intron = gene_expression_term[:, self.gene_idx]  # (S, N)
+        gene_expr_per_intron = gene_expression_term[:, self.gene_idx]  # (num_samples, num_introns)
 
         intron_gene_expression_term = (
             self.intercept_intron
