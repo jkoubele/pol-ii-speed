@@ -12,8 +12,8 @@ from typing import Optional, NamedTuple
 def _init_alpha_poisson(X: np.ndarray, y: np.ndarray, offset: np.ndarray) -> np.ndarray:
     """
     Initialise alpha via Poisson GLM (log link, statsmodels IRLS).
-    X: (S, F), y: (S,) or (S, G), offset: same shape as y.
-    Returns alpha of shape (F,) or (G, F).
+    X: (num_samples, num_features), y: (num_samples,) or (num_samples, num_genes), offset: same shape as y.
+    Returns alpha of shape (num_features,) or (num_genes, num_features).
     Falls back to zeros for any gene where the GLM fails (e.g. all-zero counts).
     """
     if y.ndim == 1:
@@ -319,11 +319,11 @@ class SplicingModel(nn.Module):
 class GlobalGeneData:
     gene_names: list[str]
     intron_names: list[str]
-    exon_reads: torch.Tensor          # (S, G)
-    intron_reads: torch.Tensor        # (S, N)
-    coverage: torch.Tensor            # (S, N, B)
-    isoform_length_offset: torch.Tensor  # (S, G)
-    gene_idx: torch.Tensor            # (N,) int64 — maps intron index → gene index
+    exon_reads: torch.Tensor          # (num_samples, num_genes)
+    intron_reads: torch.Tensor        # (num_samples, num_introns)
+    coverage: torch.Tensor            # (num_samples, num_introns, num_bins)
+    isoform_length_offset: torch.Tensor  # (num_samples, num_genes)
+    gene_idx: torch.Tensor            # (num_introns,) int64 — maps intron index → gene index
 
     def to(self, device):
         self.exon_reads = self.exon_reads.to(device)
@@ -397,16 +397,16 @@ class GlobalPol2Model(nn.Module):
 
             log_lib = torch.log(library_sizes)
             offset = (self.intercept_exon.unsqueeze(0) + log_lib.unsqueeze(1)
-                      + global_gene_data.isoform_length_offset).cpu().numpy()  # (S, G)
+                      + global_gene_data.isoform_length_offset).cpu().numpy()  # (num_samples, num_genes)
             alpha_init = _init_alpha_poisson(
                 design_matrix.cpu().numpy(), global_gene_data.exon_reads.cpu().numpy(), offset
-            )  # (G, F)
+            )  # (num_genes, num_features)
             self.alpha.data.copy_(torch.from_numpy(alpha_init).to(self.alpha.dtype))
 
             self.intercept_intron.data.copy_(
                 torch.log(global_gene_data.intron_reads.mean(dim=0) / library_sizes.mean() / 2)
             )
-            aggregated_coverage = global_gene_data.coverage.sum(dim=0)  # (N, B)
+            aggregated_coverage = global_gene_data.coverage.sum(dim=0)  # (num_introns, num_bins)
             pi_grid = torch.linspace(pi_eps, 1 - pi_eps, num_pi_grid_points,
                                      device=aggregated_coverage.device,
                                      dtype=aggregated_coverage.dtype)
