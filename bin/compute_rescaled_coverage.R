@@ -30,6 +30,13 @@ parser$add_argument("--num_bins",
                     default = 100,
                     type = "integer",
                     help = "Number of bins into which the coverage will be rescaled. ")
+parser$add_argument("--edge_margin",
+                    default = 10,
+                    type = "integer",
+                    help = paste("Number of bp trimmed from each intron edge before resampling.",
+                                 "Should match the --overlap_bp_threshold used in extract_intronic_reads.py",
+                                 "so the trimmed region contains only positions where intron-classified reads",
+                                 "are sampled without boundary bias."))
 
 args <- parser$parse_args()
 
@@ -42,6 +49,7 @@ bed_graph_plus <- import.bedGraph(args$bed_graph_plus)
 bed_graph_minus <- import.bedGraph(args$bed_graph_minus)
 
 num_bins <- args$num_bins
+edge_margin <- args$edge_margin
 
 coverage_plus <- coverage(bed_graph_plus, weight = bed_graph_plus$score)
 coverage_minus <- coverage(bed_graph_minus, weight = bed_graph_minus$score)
@@ -71,17 +79,27 @@ for (intron_number in seq_len(nrow(introns))) {
     message(sprintf("[%s] Processed %d introns", Sys.time(), intron_number))
   }
 
+  # Trim `edge_margin` bp from each side before resampling. BED is 0-indexed
+  # half-open, window() is 1-indexed closed, so the full intron is
+  # window(start + 1, end) and the trimmed region is window(start + 1 + edge_margin, end - edge_margin).
+  trim_start <- start + 1 + edge_margin
+  trim_end <- end - edge_margin
+
+  if (trim_end - trim_start < 1) {
+    next
+  }
+
   if (strand == "+") {
     coverage_rle <- stats::window(
       coverage_plus[[chromosome]],
-      start = start + 1, # Adding +1 to start since BED is 0-indexed (half-open) and window() is 1-indexed (closed interval)
-      end = end
+      start = trim_start,
+      end = trim_end
     )
   } else if (strand == "-") {
     coverage_rle <- stats::window(
       coverage_minus[[chromosome]],
-      start = start + 1, # Adding +1 to start since BED is 0-indexed (half-open) and window() is 1-indexed (closed interval)
-      end = end
+      start = trim_start,
+      end = trim_end
     )
   } else {
     stop("Invalid strand: ", strand)
