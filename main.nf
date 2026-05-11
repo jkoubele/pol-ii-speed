@@ -43,6 +43,7 @@ workflow {
     if (['model', 'all'].contains(params.stage)) {
         // Run modeling workflow
         def gene_names_file
+        def introns_bed_file
         def exon_counts
         def intron_counts
         def library_size_factors
@@ -52,6 +53,7 @@ workflow {
         if (params.stage == 'model') {
             def preprocessing_output_subfolder = "preprocessing"
             gene_names_file        = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/genomic_features/protein_coding_genes.csv"))
+            introns_bed_file       = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/genomic_features/introns.bed"))
             exon_counts            = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/exon_counts.tsv"))
             intron_counts          = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/intron_counts.tsv"))
             library_size_factors   = Channel.value(file("${params.outdir}/${preprocessing_output_subfolder}/aggregated_counts/library_size_factors.tsv"))
@@ -64,6 +66,7 @@ workflow {
         if (params.stage == 'all') {
 
             gene_names_file        = preproc_out.gene_names_file
+            introns_bed_file       = preproc_out.introns_bed_file
             exon_counts            = preproc_out.exon_counts
             intron_counts          = preproc_out.intron_counts
             library_size_factors   = preproc_out.library_size_factors
@@ -85,6 +88,7 @@ workflow {
         modeling_workflow(
             params.samplesheet,
             gene_names_file,
+            introns_bed_file,
             exon_counts,
             intron_counts,
             library_size_factors,
@@ -96,6 +100,7 @@ workflow {
             modelable_introns,
             params.fit_pol_2_model,
             params.fit_intron_specific_pol_2_model,
+            params.fit_global_pol2_model,
             params.fit_global_splicing_model,
             params.fit_gene_specific_splicing_model,
             params.fit_intron_specific_splicing_model
