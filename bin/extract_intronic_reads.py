@@ -44,8 +44,7 @@ def ignore_read(read: pysam.AlignedSegment, mapq_threshold=255) -> bool:
     return (read.mapping_quality < mapq_threshold or
             read.is_secondary or
             read.is_supplementary or
-            read.is_unmapped or
-            'N' in read.cigarstring)
+            read.is_unmapped)
 
 
 def generate_alignments(bam_input: pysam.AlignmentFile,
