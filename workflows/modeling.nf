@@ -619,6 +619,28 @@ workflow intron_specific_splicing_model_subworkflow {
 }
 
 
+workflow global_splicing_model_subworkflow {
+    take:
+        modeled_introns
+        design_matrix
+        lrt_metadata
+        reduced_design_matrices
+        library_size_factors
+        coverage_files
+
+    main:
+        FitGlobalSplicingModel(
+            modeled_introns
+                .combine(design_matrix)
+                .combine(lrt_metadata)
+                .combine(reduced_design_matrices)
+                .combine(library_size_factors)
+                // Wrapping coverage_files in an extra list prevents unwanted flattening behavior in .combine()
+                .combine(coverage_files.map { file_list -> tuple([file_list]) })
+        )
+}
+
+
 workflow global_pol2_model_subworkflow {
     take:
         modeled_genes
@@ -758,14 +780,13 @@ workflow modeling_workflow {
         }
 
         if (fit_global_splicing_model) {
-            FitGlobalSplicingModel(
-                modeled_genes.modeled_introns
-                    .combine(design_matrices_data.design_matrix)
-                    .combine(design_matrices_data.lrt_metadata)
-                    .combine(design_matrices_data.reduced_design_matrices)
-                    .combine(library_size_factors_input)
-                    // Wrapping coverage_files_input in an extra list prevents unwanted flattening behavior in .combine()
-                    .combine(coverage_files_input.map { file_list -> tuple([file_list]) })
+            global_splicing_model_subworkflow(
+                modeled_genes.modeled_introns,
+                design_matrices_data.design_matrix,
+                design_matrices_data.lrt_metadata,
+                design_matrices_data.reduced_design_matrices,
+                library_size_factors_input,
+                coverage_files_input
             )
         }
 
