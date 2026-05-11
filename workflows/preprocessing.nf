@@ -208,7 +208,7 @@ process ExtractIntronicReads {
         --input_bam $bam_file \\
         --intron_bed_file $introns_bed_file \\
         --strandedness $strand \\
-        --overlap_bp_threshold ${edge_margin}
+        --edge_margin ${edge_margin}
 
     mv intron_read_counts.tsv ${sample}.intron_read_counts.tsv
 
@@ -345,6 +345,7 @@ process IntronMetacoveragePlots {
         --coverage_data_folder . \
         --introns_bed_file $introns_bed_file \
         --gene_names $gene_names_csv \
+        --gene_set_label 'protein-coding'
     """
 }
 

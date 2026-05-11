@@ -25,7 +25,8 @@ def fit_pi(coverage: np.ndarray) -> float:
 
 
 def plot_metacoverage(coverages_subset: dict[str, pd.DataFrame], introns_df: pd.DataFrame,
-                      output_folder: Path) -> None:
+                      output_folder: Path, gene_set_label: str = '') -> None:
+    intron_descriptor = f'{gene_set_label} introns' if gene_set_label else 'introns'
     output_folder.mkdir(exist_ok=True, parents=True)
 
     introns_of_interest = set(introns_df['intron_name'])
@@ -47,7 +48,7 @@ def plot_metacoverage(coverages_subset: dict[str, pd.DataFrame], introns_df: pd.
     ax.set_xlabel("Position in intron (5' to 3')")
     ax.set_ylabel("Reads")
     ax.set_ylim(bottom=0)
-    ax.set_title(f"Meta-coverage (all introns) \n est. fraction transcribing = {pi:.2f}")
+    ax.set_title(f"Meta-coverage (all {intron_descriptor}) \n est. fraction transcribing = {pi:.2f}")
     ax.legend()
     fig.savefig(output_folder / 'all_introns.png', dpi=300, bbox_inches='tight')
     plt.close(fig)
@@ -91,7 +92,7 @@ def plot_metacoverage(coverages_subset: dict[str, pd.DataFrame], introns_df: pd.
             fontsize=14)
         ax.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
 
-    fig.suptitle('Meta-coverages (stratified by intron length)', fontsize=18)
+    fig.suptitle(f'Meta-coverages of {intron_descriptor} (stratified by intron length)', fontsize=18)
     fig.legend(handles=legend_handles, loc='center left', bbox_to_anchor=(0.84, 0.5), frameon=False, fontsize=14)
     fig.subplots_adjust(left=0.08, right=0.82, top=0.87, bottom=0.08, hspace=0.35, wspace=0.25)
     fig.savefig(output_folder / 'introns_stratified_by_length.png', dpi=300, bbox_inches='tight')
@@ -131,8 +132,15 @@ if __name__ == "__main__":
                         default=None,
                         help='R-style design formula (e.g. ~genotype+treatment). Columns present in '
                              'both the formula and the samplesheet are used for stratification.')
+    parser.add_argument('--gene_set_label',
+                        type=str,
+                        default='',
+                        help='Optional label describing the gene set (e.g. "protein-coding"). '
+                             'Inserted into the plot titles to make the filtering applied via '
+                             '--gene_names explicit.')
 
     args = parser.parse_args()
+    gene_set_label = args.gene_set_label
     output_folder = args.output_folder
     output_folder.mkdir(exist_ok=True, parents=True)
 
@@ -170,6 +178,8 @@ if __name__ == "__main__":
                 if not subset:
                     continue
                 level_str = re.sub(r'[^\w\-]', '_', str(level))
-                plot_metacoverage(subset, introns_df, output_folder / col / level_str)
+                plot_metacoverage(subset, introns_df, output_folder / col / level_str,
+                                  gene_set_label=gene_set_label)
     else:
-        plot_metacoverage(coverages_by_sample, introns_df, output_folder)
+        plot_metacoverage(coverages_by_sample, introns_df, output_folder,
+                          gene_set_label=gene_set_label)
