@@ -75,7 +75,7 @@ def plot_metacoverage(coverages_subset: dict[str, pd.DataFrame], introns_df: pd.
 
         h1, = ax.plot(BIN_LOCATIONS, quantile_coverage, color='#222222', linewidth=2.5, label='Coverage')
         h2 = ax.fill_between(BIN_LOCATIONS, trapezoid_top, y2=uniform_top, alpha=0.45, color='royalblue',
-                              label='Transcribing introns')
+                             label='Transcribing introns')
         h3 = ax.fill_between(BIN_LOCATIONS, uniform_top, alpha=0.45, color='darkorange', label='Unspliced introns')
 
         if legend_handles is None:
@@ -99,16 +99,8 @@ def plot_metacoverage(coverages_subset: dict[str, pd.DataFrame], introns_df: pd.
 
 
 def extract_formula_columns(formula: str) -> list[str]:
-    formula = formula.lstrip('~').strip()
-    tokens = re.split(r'[+:*]', formula)
-    seen = set()
-    result = []
-    for t in tokens:
-        t = t.strip()
-        if t and t not in seen:
-            seen.add(t)
-            result.append(t)
-    return result
+    tokens = re.split(r'[+:*]', formula.lstrip('~').strip())
+    return list({t.strip() for t in tokens if t.strip()})
 
 
 if __name__ == "__main__":
