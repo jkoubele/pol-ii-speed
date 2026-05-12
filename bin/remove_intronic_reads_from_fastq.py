@@ -30,7 +30,14 @@ if __name__ == "__main__":
         for read in tqdm(bam_input, desc="Reading BAM", mininterval=1):
             intronic_reads_id.add(read.query_name)
 
+    batch_size = 1_000_000
     with gzip.open(Path(args.input_fastq), "rt") as handle_in, open(Path(args.output_fastq), "wt") as handle_out:
-        input_iterator = SeqIO.parse(handle_in, "fastq")
-        output_iterator = (record for record in input_iterator if record.id not in intronic_reads_id)
-        SeqIO.write(output_iterator, handle_out, "fastq")
+        batch = []
+        for record in tqdm(SeqIO.parse(handle_in, "fastq"), desc="Filtering reads", mininterval=1):
+            if record.id not in intronic_reads_id:
+                batch.append(record.format("fastq"))
+                if len(batch) >= batch_size:
+                    handle_out.write("".join(batch))
+                    batch.clear()
+        if batch:
+            handle_out.write("".join(batch))
