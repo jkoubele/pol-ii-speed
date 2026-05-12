@@ -107,11 +107,19 @@ for (intron_number in seq_len(nrow(introns))) {
 
 
   coverage <- as.numeric(coverage_rle)
-  rescaled_coverage <- approx(
-    x = seq_along(coverage),
-    y = coverage,
-    xout = seq(1, length(coverage), length.out = num_bins)
-  )$y
+  L <- length(coverage)
+  if (L <= num_bins) {
+    rescaled_coverage <- approx(
+      x = seq_along(coverage),
+      y = coverage,
+      xout = seq(1, L, length.out = num_bins)
+    )$y
+  } else {
+    bin_edges <- round(seq(0L, L, length.out = num_bins + 1L))
+    rescaled_coverage <- vapply(seq_len(num_bins), function(b) {
+      mean(coverage[(bin_edges[b] + 1L):bin_edges[b + 1L]])
+    }, FUN.VALUE = numeric(1))
+  }
 
   rescaled_sum <- sum(rescaled_coverage)
 
