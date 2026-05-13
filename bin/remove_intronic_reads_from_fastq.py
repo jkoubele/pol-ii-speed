@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
-import gzip
+import io
+import subprocess
 from pathlib import Path
 
 import pysam
@@ -30,7 +31,18 @@ if __name__ == "__main__":
         for read in tqdm(bam_input, desc="Reading BAM", mininterval=1):
             intronic_reads_id.add(read.query_name)
 
-    with gzip.open(Path(args.input_fastq), "rt") as handle_in, open(Path(args.output_fastq), "wt") as handle_out:
-        input_iterator = SeqIO.parse(handle_in, "fastq")
-        output_iterator = (record for record in input_iterator if record.id not in intronic_reads_id)
-        SeqIO.write(output_iterator, handle_out, "fastq")
+    batch_size = 1_000_000
+    pigz_process = subprocess.Popen(['pigz', '-d', '-c', str(args.input_fastq)], stdout=subprocess.PIPE)
+    assert pigz_process.stdout is not None
+    handle_in = io.TextIOWrapper(pigz_process.stdout, encoding='ascii')
+    with open(Path(args.output_fastq), "wt") as handle_out:
+        batch = []
+        for record in tqdm(SeqIO.parse(handle_in, "fastq"), desc="Filtering reads", mininterval=1):
+            if record.id not in intronic_reads_id:
+                batch.append(record.format("fastq"))
+                if len(batch) >= batch_size:
+                    handle_out.write("".join(batch))
+                    batch.clear()
+        if batch:
+            handle_out.write("".join(batch))
+    pigz_process.wait()

@@ -1,5 +1,10 @@
 def preprocessing_output_subfolder = "preprocessing"
 
+// bp trimmed from each intron edge. Shared between the intronic-read overlap
+// threshold (ExtractIntronicReads) and the coverage rescaling window
+// (RescaleCoverage) so the two stay coupled.
+def edge_margin = 10
+
 process FastQC {
     input:
     tuple val(sample), path(read1), path(read2)
@@ -202,7 +207,8 @@ process ExtractIntronicReads {
     extract_intronic_reads.py \\
         --input_bam $bam_file \\
         --intron_bed_file $introns_bed_file \\
-        --strandedness $strand
+        --strandedness $strand \\
+        --edge_margin ${edge_margin}
 
     mv intron_read_counts.tsv ${sample}.intron_read_counts.tsv
 
@@ -319,7 +325,8 @@ process RescaleCoverage {
         --bed_graph_minus $bedgraph_file_minus \
         --introns_bed_file $introns_bed_file \
         --output_file_basename $sample \
-        --introns_count_file $intron_counts_file
+        --introns_count_file $intron_counts_file \
+        --edge_margin ${edge_margin}
     """
 }
 
@@ -338,6 +345,7 @@ process IntronMetacoveragePlots {
         --coverage_data_folder . \
         --introns_bed_file $introns_bed_file \
         --gene_names $gene_names_csv \
+        --gene_set_label 'protein-coding'
     """
 }
 

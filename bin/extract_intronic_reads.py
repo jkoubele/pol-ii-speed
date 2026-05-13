@@ -4,7 +4,6 @@ import argparse
 import bisect
 from collections import defaultdict
 from enum import StrEnum
-from itertools import chain
 from pathlib import Path
 from typing import NamedTuple, Optional, Iterator
 
@@ -44,8 +43,7 @@ def ignore_read(read: pysam.AlignedSegment, mapq_threshold=255) -> bool:
     return (read.mapping_quality < mapq_threshold or
             read.is_secondary or
             read.is_supplementary or
-            read.is_unmapped or
-            'N' in read.cigarstring)
+            read.is_unmapped)
 
 
 def generate_alignments(bam_input: pysam.AlignmentFile,
@@ -115,7 +113,15 @@ if __name__ == "__main__":
                         )
     parser.add_argument('--overlap_bp_threshold',
                         type=int,
-                        help='Min. overlap with intron needed to classify the read as intronic.',
+                        help='Min. overlap with the (edge-trimmed) intron needed to classify the read as intronic. '
+                             'The annotation-imprecision buffer is now handled by --edge_margin, so this threshold '
+                             'only needs to filter spurious near-zero overlaps.',
+                        default=5)
+    parser.add_argument('--edge_margin',
+                        type=int,
+                        help='Number of bp trimmed from each intron edge before classification and BED export. '
+                             'Should match the --edge_margin used in compute_rescaled_coverage.R so read counts '
+                             'and rescaled coverage refer to the same interior region.',
                         default=10)
 
     parser.add_argument('--mapq_threshold',
@@ -142,6 +148,7 @@ if __name__ == "__main__":
     paired_sequencing = args.paired_sequencing
     strandendess_type = args.strandedness
     overlap_bp_threshold = args.overlap_bp_threshold
+    edge_margin = args.edge_margin
     create_bam_output = args.create_bam_output
     create_bed_output = args.create_bed_output
 
@@ -151,22 +158,28 @@ if __name__ == "__main__":
                              sep='\t',
                              names=['chromosome', 'start', 'end', 'name', 'score', 'strand'],
                              dtype={"chromosome": "string", "strand": "string"})
+    # Initialized for every intron in the BED, including any that are too short to
+    # survive the edge trim, so the final TSV always has a count entry for each intron.
+    read_counts = {name: 0 for name in introns_df['name']}
+
     introns_by_chrom_and_strand: dict[ChromAndStrand, list[Intron]] = defaultdict(list)
     for name, chromosome, strand, start, end in zip(introns_df['name'],
                                                     introns_df['chromosome'],
                                                     introns_df['strand'],
                                                     introns_df['start'],
                                                     introns_df['end']):
+        trimmed_start = start + edge_margin
+        trimmed_end = end - edge_margin
+        if trimmed_end - trimmed_start <= 0:
+            continue
         intron = Intron(name=name,
                         chromosome=chromosome,
                         strand=strand,
-                        start=start,
-                        end=end,
-                        interval=py_interval([start, end]))
+                        start=trimmed_start,
+                        end=trimmed_end,
+                        interval=py_interval([trimmed_start, trimmed_end]))
         introns_by_chrom_and_strand[ChromAndStrand(chromosome=intron.chromosome,
                                                    strand=intron.strand)].append(intron)
-
-    read_counts = {intron.name: 0 for intron in chain.from_iterable(introns_by_chrom_and_strand.values())}
     introns_by_chrom_and_strand = {key: sorted(value, key=lambda x: x.start) for
                                    key, value in introns_by_chrom_and_strand.items()}
 
