@@ -37,7 +37,8 @@ workflow {
             params.salmon_index_with_decoy,
             params.star_index,
             params.salmon_index,
-            params.ignore_tx_version)
+            params.ignore_tx_version,
+            params.genomic_features_dir)
     }
 
     if (['model', 'all'].contains(params.stage)) {

@@ -9,6 +9,7 @@ genome_fasta: "/path/to/genome/fasta"
 transcriptome_fasta: "/path/to/transcriptome/fasta"
 gtf_source: "ensembl" # Either 'ensembl' or 'gencode'.
 
+genomic_features_dir: null # Optional path to a pre-computed genomic features folder (output of ExtractGenomicFeatures). Reusable across datasets that share the same genome annotation.
 star_index: null # Optional path to existing STAR index.
 salmon_index: null # Optional path to existing Salmon index.
 salmon_index_with_decoy: false  # If true, use decoy-aware Salmon indexing.

@@ -42,6 +42,7 @@ process MultiQC {
 process ExtractGenomicFeatures {
     input:
     path gtf
+    val precomputed_genomic_features_dir
 
     output:
         path('introns.bed'), emit: introns_bed_file
@@ -54,11 +55,23 @@ process ExtractGenomicFeatures {
     publishDir "${params.outdir}/${preprocessing_output_subfolder}/genomic_features", mode: 'copy'
 
     script:
+    if (precomputed_genomic_features_dir) {
+        log.info "Using provided genomic features directory: ${precomputed_genomic_features_dir}"
+    """
+    cp ${precomputed_genomic_features_dir}/introns.bed .
+    cp ${precomputed_genomic_features_dir}/constitutive_exons.bed .
+    cp ${precomputed_genomic_features_dir}/introns.gtf .
+    cp ${precomputed_genomic_features_dir}/constitutive_exons.gtf .
+    cp ${precomputed_genomic_features_dir}/protein_coding_genes.csv .
+    cp ${precomputed_genomic_features_dir}/all_genes.csv .
+    """
+    } else {
     """
     extract_genomic_features_from_gtf.R \
         --gtf $gtf \
         --threads ${task.cpus}
     """
+    }
 }
 
 
@@ -408,6 +421,7 @@ workflow preprocessing_workflow {
         star_index
         salmon_index
         ignore_tx_version
+        genomic_features_dir
 
     main:
         def gtf_channel = Channel.value(file(gtf_file))
@@ -460,7 +474,7 @@ workflow preprocessing_workflow {
         def tx2gene_out = PrepareTx2Gene(gtf_channel)
         def fai_index = CreateGenomeFastaIndex(genome_fasta_channel).genome_fai_file
 
-        def genomic_features = ExtractGenomicFeatures(gtf_channel)
+        def genomic_features = ExtractGenomicFeatures(gtf_channel, Channel.value(genomic_features_dir))
 
         def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
         def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
