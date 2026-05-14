@@ -51,7 +51,19 @@ def generate_alignments(bam_input: pysam.AlignmentFile,
                         strandendess_type: StrandednessType,
                         mapq_threshold: int = 255) -> Iterator[Alignment]:
     if not paired:
-        raise NotImplementedError("Unpaired mode not implemented yet :( ")
+        for read in tqdm(bam_input, mininterval=1):
+            if ignore_read(read, mapq_threshold=mapq_threshold):
+                continue
+            if strandendess_type == StrandednessType.FORWARD:
+                strand = '+' if read.is_forward else '-'
+            elif strandendess_type == StrandednessType.REVERSE:
+                # SE reverse-stranded: the single read is antisense to the transcript,
+                # so transcript strand is opposite to the read mapping strand.
+                strand = '+' if read.is_reverse else '-'
+            else:
+                raise RuntimeError(f'Invalid strandedness {strandendess_type}')
+            yield Alignment(chromosome=read.reference_name, strand=strand, read_1=read)
+        return
 
     reads_1: dict[str, pysam.AlignedSegment] = {}
     reads_2: dict[str, pysam.AlignedSegment] = {}
@@ -217,7 +229,7 @@ if __name__ == "__main__":
         bed_output_minus_strand = open(output_bed_minus_strand_path, 'a')
 
     for alignment in generate_alignments(bam_input=bam_input,
-                                         paired=True,
+                                         paired=paired_sequencing,
                                          strandendess_type=strandendess_type,
                                          mapq_threshold=args.mapq_threshold):
         intron_list = introns_by_chrom_and_strand.get(ChromAndStrand(alignment.chromosome, alignment.strand))

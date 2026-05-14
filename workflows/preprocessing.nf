@@ -7,7 +7,7 @@ def edge_margin = 10
 
 process FastQC {
     input:
-    tuple val(sample), path(read1), path(read2)
+    tuple val(sample), path(read1), path(read2), val(is_paired)
 
     tag "$sample"
 
@@ -18,8 +18,9 @@ process FastQC {
     publishDir "${params.outdir}/${preprocessing_output_subfolder}/FastQC", mode: 'copy'
 
     script:
+    def reads = is_paired ? "$read1 $read2" : "$read1"
     """
-    fastqc $read1 $read2 --outdir .
+    fastqc $reads --outdir .
     """
 }
 
@@ -176,7 +177,7 @@ process CreateGenomeFastaIndex {
 
 process STARAlign {
     input:
-        tuple val(sample), path(read1), path(read2), path(star_index)
+        tuple val(sample), path(read1), path(read2), path(star_index), val(is_paired)
 
     output:
         tuple val(sample), path("${sample}.Aligned.sortedByCoord.out.bam"), emit: star_bam
@@ -187,16 +188,18 @@ process STARAlign {
     tag "$sample"
 
     script:
+    def reads_arg    = is_paired ? "--readFilesIn $read1 $read2" : "--readFilesIn $read1"
+    def pe_overlap   = is_paired ? "--peOverlapNbasesMin 10" : ""
     """
     STAR \
       --runThreadN ${task.cpus} \
       --genomeDir $star_index \
-      --readFilesIn $read1 $read2 \
+      $reads_arg \
       --readFilesCommand zcat \
       --outSAMtype BAM SortedByCoordinate \
       --outSAMattributes All \
       --quantMode GeneCounts \
-      --peOverlapNbasesMin 10 \
+      $pe_overlap \
       --outFileNamePrefix ${sample}. \
       --limitBAMsortRAM 60000000000
     """
@@ -204,7 +207,7 @@ process STARAlign {
 
 process ExtractIntronicReads {
     input:
-        tuple val(sample), path(bam_file), val(strand), path(introns_bed_file)
+        tuple val(sample), path(bam_file), val(strand), val(is_paired), path(introns_bed_file)
 
     output:
         tuple val(sample), path("intronic_reads_sorted.bam"), emit:  intronic_bam_files
@@ -216,12 +219,14 @@ process ExtractIntronicReads {
     tag "$sample"
 
     script:
+    def paired_arg = is_paired ? "" : "--unpaired_sequencing"
     """
     extract_intronic_reads.py \\
         --input_bam $bam_file \\
         --intron_bed_file $introns_bed_file \\
         --strandedness $strand \\
-        --edge_margin ${edge_margin}
+        --edge_margin ${edge_margin} \\
+        $paired_arg
 
     mv intron_read_counts.tsv ${sample}.intron_read_counts.tsv
 
@@ -238,16 +243,17 @@ process ExtractIntronicReads {
 
 process RemoveIntronicReadsFromFASTQ {
     input:
-        tuple val(sample), path(read1), path(read2), path(bam_introns)
+        tuple val(sample), path(read1), path(read2), path(bam_introns), val(is_paired)
 
     output:
-        tuple val(sample), path("R1.fastq.gz"), path("R2.fastq.gz"), emit: exonic_fastq
+        tuple val(sample), path("R*.fastq.gz"), val(is_paired), emit: exonic_fastq
 
     publishDir "${params.outdir}/${preprocessing_output_subfolder}/FASTQ_without_intronic_reads/${sample}", mode: 'copy'
 
     tag "$sample"
 
     script:
+    if (is_paired)
     """
     remove_intronic_reads_from_fastq.py \\
         --bam_introns $bam_introns \\
@@ -261,11 +267,19 @@ process RemoveIntronicReadsFromFASTQ {
         --output_fastq R2.fastq
     pigz -p ${task.cpus} -f R2.fastq
     """
+    else
+    """
+    remove_intronic_reads_from_fastq.py \\
+        --bam_introns $bam_introns \\
+        --input_fastq $read1 \\
+        --output_fastq R1.fastq
+    pigz -p ${task.cpus} -f R1.fastq
+    """
 }
 
 process SalmonQuantification {
     input:
-        tuple val(sample), path(read1), path(read2), path(salmon_index)
+        tuple val(sample), path(reads), val(is_paired), path(salmon_index)
 
     output:
         tuple val(sample), path("${sample}.quant.sf"), emit: salmon_quant
@@ -276,12 +290,12 @@ process SalmonQuantification {
     tag "$sample"
 
     script:
+    def reads_arg = is_paired ? "-1 ${reads[0]} -2 ${reads[1]}" : "-r ${reads[0]}"
     """
     salmon quant \
         -i $salmon_index \
         -l A \
-        -1 $read1 \
-        -2 $read2 \
+        $reads_arg \
         -p ${task.cpus} \
         -o .
     mv quant.sf ${sample}.quant.sf
@@ -457,18 +471,20 @@ workflow preprocessing_workflow {
             .fromPath(samplesheet)
             .splitCsv(header: true)
             .map { row ->
-                def sample      = row.sample
-                def fq1         = file("${fastq_dir}/${row.fastq_1}")
-                def fq2         = file("${fastq_dir}/${row.fastq_2}")
-                def strand      = row.strandedness
+                def sample    = row.sample
+                def fq1       = file("${fastq_dir}/${row.fastq_1}")
+                def fq2_str   = row.fastq_2?.trim()
+                def is_paired = fq2_str as boolean
+                def fq2       = is_paired ? file("${fastq_dir}/${fq2_str}") : []
+                def strand    = row.strandedness
 
                 if (!fq1.exists()) error "FASTQ file not found: ${fq1}"
-                if (!fq2.exists()) error "FASTQ file not found: ${fq2}"
+                if (is_paired && !fq2.exists()) error "FASTQ file not found: ${fq2}"
                 if (!['forward', 'reverse'].contains(strand)) {
                     error "Invalid strandedness '${strand}' for sample '${sample}'"
                 }
 
-                tuple(sample, fq1, fq2, strand)
+                tuple(sample, fq1, fq2, strand, is_paired)
             }
 
         def tx2gene_out = PrepareTx2Gene(gtf_channel)
@@ -476,24 +492,25 @@ workflow preprocessing_workflow {
 
         def genomic_features = ExtractGenomicFeatures(gtf_channel, Channel.value(genomic_features_dir))
 
-        def fastqc_out = samples.map{sample, fq1, fq2, strand -> tuple(sample, fq1, fq2)} | FastQC
+        def fastqc_out = samples.map{sample, fq1, fq2, strand, is_paired -> tuple(sample, fq1, fq2, is_paired)} | FastQC
         def fastqc_out_aggregated = fastqc_out.fastqc_reports.collect()
         fastqc_out_aggregated | MultiQC
 
         def aligned_bams = samples
         .combine(star_index_channel)
-        .map { sample, r1, r2, strand, star_index ->
-            tuple(sample, r1, r2, star_index)
+        .map { sample, r1, r2, strand, is_paired, star_index ->
+            tuple(sample, r1, r2, star_index, is_paired)
         } | STARAlign
 
        def extracted_intronic_reads = aligned_bams.star_bam
-       .join(samples.map { sample, r1, r2, strand -> tuple(sample, strand) })
+       .join(samples.map { sample, r1, r2, strand, is_paired -> tuple(sample, strand, is_paired) })
        .combine(genomic_features.introns_bed_file)
        | ExtractIntronicReads
 
        def exonic_fastq = samples
-       .map { sample, r1, r2, strand -> tuple(sample, r1, r2) }
+       .map { sample, r1, r2, strand, is_paired -> tuple(sample, r1, r2, is_paired) }
        .join(extracted_intronic_reads.intronic_bam_files)
+       .map { sample, r1, r2, is_paired, bam -> tuple(sample, r1, r2, bam, is_paired) }
        | RemoveIntronicReadsFromFASTQ
 
        def salmon_quant_out = exonic_fastq.exonic_fastq
