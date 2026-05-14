@@ -37,7 +37,7 @@ class CacheForRegularization:
 def make_lbfgs_optimizer(model: nn.Module) -> optim.LBFGS:
     return optim.LBFGS(
         model.parameters(),
-        lr=0.05,
+        lr=1.0,
         max_iter=20,
         tolerance_change=1e-9,
         tolerance_grad=1e-7,
@@ -52,7 +52,7 @@ def train_model(
         closure: Callable[[], torch.Tensor],
         evaluate_loss: Callable[[], torch.Tensor],
         max_epochs=200,
-        max_patience=5,
+        max_patience=3,
         loss_change_tolerance=1e-6,
         verbose: bool = False,
 ) -> tuple[nn.Module, TrainingResults]:
@@ -548,6 +548,37 @@ def make_global_pol2_closures(
     return closure, evaluate_loss
 
 
+def _train_two_stage(
+        model: nn.Module,
+        global_param_names: set[str],
+        make_closures: Callable[[optim.Optimizer], tuple[Callable, Callable]],
+        label: str = '',
+        verbose: bool = False,
+) -> tuple[nn.Module, TrainingResults]:
+    prefix = f'[{label}] ' if label else ''
+
+    # Stage 1: freeze per-gene/per-intron params; optimize only shared params
+    print(f'{prefix}Stage 1: optimizing shared params ({", ".join(sorted(global_param_names))})', flush=True)
+    for name, param in model.named_parameters():
+        param.requires_grad_(name in global_param_names)
+    optimizer_stage_1 = optim.LBFGS(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=1.0, max_iter=20, tolerance_change=1e-9, tolerance_grad=1e-7,
+        history_size=100, line_search_fn='strong_wolfe',
+    )
+    closure_stage_1, eval_stage_1 = make_closures(optimizer_stage_1)
+    model, _ = train_model(model, optimizer_stage_1, closure_stage_1, eval_stage_1, max_epochs=500, verbose=verbose)
+
+    # Stage 2: unfreeze all, refine jointly from warm start
+    print(f'{prefix}Stage 2: joint optimization (all params)', flush=True)
+    for param in model.parameters():
+        param.requires_grad_(True)
+    optimizer_stage_2 = make_lbfgs_optimizer(model)
+    closure_stage_2, eval_stage_2 = make_closures(optimizer_stage_2)
+    model, training_results = train_model(model, optimizer_stage_2, closure_stage_2, eval_stage_2, max_epochs=500, verbose=verbose)
+    return model, training_results
+
+
 def get_global_pol2_model_results(
         global_gene_data: GlobalGeneData,
         dataset_metadata: DatasetMetadata,
@@ -565,10 +596,12 @@ def get_global_pol2_model_results(
     ).to(device)
     model.initialize_parameters(global_gene_data, dataset_metadata.library_sizes, dataset_metadata.design_matrix)
 
-    optimizer = make_lbfgs_optimizer(model)
-    closure, evaluate_loss = make_global_pol2_closures(model, optimizer, global_gene_data, dataset_metadata)
-    model, training_results = train_model(
-        model, optimizer, closure, evaluate_loss, max_epochs=500, verbose=verbose,
+    model, training_results = _train_two_stage(
+        model,
+        global_param_names={'beta', 'gamma'},
+        make_closures=lambda opt: make_global_pol2_closures(model, opt, global_gene_data, dataset_metadata),
+        label='Global Pol2 | full model',
+        verbose=verbose,
     )
 
     feature_names = dataset_metadata.feature_names
@@ -616,14 +649,14 @@ def get_global_pol2_model_results(
 
             model_reduced.load_state_dict(reduced_state)
 
-            optimizer_reduced = make_lbfgs_optimizer(model_reduced)
-            closure_reduced, evaluate_loss_reduced = make_global_pol2_closures(
-                model_reduced, optimizer_reduced, global_gene_data, dataset_metadata,
-                reduced_matrix=reduced_matrix,
-            )
-            model_reduced, results_reduced = train_model(
-                model_reduced, optimizer_reduced, closure_reduced, evaluate_loss_reduced, max_epochs=500,
-                verbose=verbose
+            model_reduced, results_reduced = _train_two_stage(
+                model_reduced,
+                global_param_names={'beta', 'gamma', 'reduced_lfc'},
+                make_closures=lambda opt: make_global_pol2_closures(
+                    model_reduced, opt, global_gene_data, dataset_metadata, reduced_matrix,
+                ),
+                label=f'Global Pol2 | LRT {lrt_row["test_id"]} | {tested_parameter}',
+                verbose=verbose,
             )
 
             full_lfc_vals = model.beta.detach() if tested_parameter == TestableParameters.BETA else model.gamma.detach()
