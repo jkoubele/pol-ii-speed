@@ -10,7 +10,7 @@ import torch
 from tqdm import tqdm
 
 from pol_ii_speed_modeling.load_dataset import load_dataset_metadata
-from pol_ii_speed_modeling.train import get_splicing_model_results
+from pol_ii_speed_modeling.train import get_global_splicing_model_results
 
 # --- Dev block: comment out when running via Nextflow ---
 # results_folder = Path('/home/jakub/Desktop/c_elegans_test/results/')
@@ -83,12 +83,11 @@ if __name__ == "__main__":
         dtype=torch.float32,
     )
 
-    model_param_df, test_results_df, _ = get_splicing_model_results(
+    model_param_df, test_results_df = get_global_splicing_model_results(
         coverage=coverage,
         dataset_metadata=dataset_metadata,
         intron_names=intron_names,
         verbose=True,
-        compute_wald_test=False,
     )
 
     model_param_df.reset_index(drop=True).to_csv(

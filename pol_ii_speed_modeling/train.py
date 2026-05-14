@@ -561,13 +561,15 @@ def _train_two_stage(
     print(f'{prefix}Stage 1: optimizing shared params ({", ".join(sorted(global_param_names))})', flush=True)
     for name, param in model.named_parameters():
         param.requires_grad_(name in global_param_names)
-    optimizer_stage_1 = optim.LBFGS(
-        [p for p in model.parameters() if p.requires_grad],
-        lr=1.0, max_iter=20, tolerance_change=1e-9, tolerance_grad=1e-7,
-        history_size=100, line_search_fn='strong_wolfe',
-    )
-    closure_stage_1, eval_stage_1 = make_closures(optimizer_stage_1)
-    model, _ = train_model(model, optimizer_stage_1, closure_stage_1, eval_stage_1, max_epochs=500, verbose=verbose)
+    stage_1_params = [p for p in model.parameters() if p.requires_grad and p.numel() > 0]
+    if stage_1_params:
+        optimizer_stage_1 = optim.LBFGS(
+            stage_1_params,
+            lr=1.0, max_iter=20, tolerance_change=1e-9, tolerance_grad=1e-7,
+            history_size=100, line_search_fn='strong_wolfe',
+        )
+        closure_stage_1, eval_stage_1 = make_closures(optimizer_stage_1)
+        model, _ = train_model(model, optimizer_stage_1, closure_stage_1, eval_stage_1, max_epochs=500, verbose=verbose)
 
     # Stage 2: unfreeze all, refine jointly from warm start
     print(f'{prefix}Stage 2: joint optimization (all params)', flush=True)
@@ -681,6 +683,86 @@ def get_global_pol2_model_results(
             test_results_list.append(test_result)
 
     return model_param_df, pd.DataFrame(test_results_list)
+
+
+def get_global_splicing_model_results(
+        coverage: torch.Tensor,
+        dataset_metadata: DatasetMetadata,
+        intron_names: list[str],
+        device: str = 'cpu',
+        verbose: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    coverage = coverage.to(device)
+    dataset_metadata = dataset_metadata.to(device)
+
+    model_full = SplicingModel(
+        feature_names=dataset_metadata.feature_names,
+        intron_names=intron_names,
+    ).to(device)
+    model_full.initialize_theta(coverage)
+
+    model_full, results_full = _train_two_stage(
+        model_full,
+        global_param_names={'lfc'},
+        make_closures=lambda opt: make_splicing_closures(model_full, opt, coverage, dataset_metadata.design_matrix),
+        label='Global splicing | full model',
+        verbose=verbose,
+    )
+
+    model_param_df = model_full.get_param_df()
+    model_param_df['loss_full_model'] = results_full.final_loss
+    model_param_df['training_diverged_full_model'] = results_full.training_diverged
+    model_param_df['training_converged_within_max_epochs_full_model'] = results_full.converged_within_max_epochs
+    model_param_df = model_param_df.set_index(['parameter_type', 'feature_name', 'intron_name'], drop=False)
+
+    test_results_list: list[dict] = []
+    for _, lrt_row in dataset_metadata.lrt_metadata.iterrows():
+        reduced_matrix = dataset_metadata.reduced_matrices[lrt_row['test_id']].to(device)
+        num_reduced_features = reduced_matrix.shape[1]
+        placeholder_names = [f'reduced_feature_{i}' for i in range(num_reduced_features)]
+
+        model_reduced = SplicingModel(
+            feature_names=placeholder_names,
+            intron_names=intron_names,
+        ).to(device)
+
+        with torch.no_grad():
+            model_reduced.theta.data.copy_(model_full.theta.data)
+            if num_reduced_features > 0:
+                full_lfc_contribution = dataset_metadata.design_matrix @ model_full.lfc
+                model_reduced.lfc.data.copy_(
+                    torch.linalg.lstsq(reduced_matrix, full_lfc_contribution).solution
+                )
+
+        model_reduced, results_reduced = _train_two_stage(
+            model_reduced,
+            global_param_names={'lfc'},
+            make_closures=lambda opt: make_splicing_closures(model_reduced, opt, coverage, reduced_matrix),
+            label=f'Global splicing | LRT {lrt_row["test_id"]}',
+            verbose=verbose,
+        )
+
+        lfc_positive = 0.0 if pd.isna(lrt_row['lfc_column_positive']) else \
+            model_param_df.loc[('lfc', lrt_row['lfc_column_positive'], None)]['value']
+        lfc_negative = 0.0 if pd.isna(lrt_row['lfc_column_negative']) else \
+            model_param_df.loc[('lfc', lrt_row['lfc_column_negative'], None)]['value']
+
+        chi2_stat = 2 * (results_reduced.final_loss - results_full.final_loss)
+        test_result = lrt_row.to_dict()
+        test_result['tested_parameter'] = 'lfc'
+        test_result['intron_name'] = None
+        test_result['lfc'] = lfc_positive - lfc_negative
+        test_result['loss_full_model'] = results_full.final_loss
+        test_result['loss_reduced_model'] = results_reduced.final_loss
+        test_result['chi2_test_statistics'] = chi2_stat
+        test_result['p_value'] = 1 - stats.chi2.cdf(chi2_stat, df=lrt_row['lrt_df'])
+        test_result['training_diverged_reduced_model'] = results_reduced.training_diverged
+        test_result['training_converged_within_max_epochs_reduced_model'] = results_reduced.converged_within_max_epochs
+        test_result['num_epochs_full_model'] = results_full.num_epochs
+        test_result['num_epochs_reduced_model'] = results_reduced.num_epochs
+        test_results_list.append(test_result)
+
+    return model_param_df.reset_index(drop=True), pd.DataFrame(test_results_list)
 
 
 def get_regularized_splicing_model_results(
