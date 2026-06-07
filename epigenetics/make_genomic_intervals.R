@@ -2,8 +2,12 @@ library(rtracklayer)
 library(argparse)
 
 parser <- ArgumentParser()
-parser$add_argument("--gtf",        required = TRUE, help = "Path to GTF file")
-parser$add_argument("--output_dir", required = TRUE, help = "Output directory for BED files")
+parser$add_argument("--gtf",
+                    default = '/home/jakub/Desktop/reference_genomes/Ensembl/GRCh38_115/Homo_sapiens.GRCh38.115.gtf',
+                     help = "Path to GTF file")
+parser$add_argument("--output_dir",
+                    default='/home/jakub/Desktop/pol-ii-speed/epigenetics/genomic_intervals',
+                    help = "Output directory for BED files")
 args <- parser$parse_args()
 
 gtf_path   <- args$gtf
