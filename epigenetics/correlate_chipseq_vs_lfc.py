@@ -188,19 +188,20 @@ def plot_correlation_heatmap(corr_df, out_dir, lfc_col, top_n=30):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    gene = 'SUPT16H'
     parser.add_argument(
         "--pipeline-dir",
-        default="/home/jakub/Desktop/pol-ii-speed/ENCODE_degron/pipeline_results/BRD4",
+        default=f"/home/jakub/Desktop/pol-ii-speed/ENCODE_degron/pipeline_results/{gene}",
         help="Pipeline results dir containing gene_specific_pol_2_model/ and gene_specific_splicing_model/",
     )
     parser.add_argument(
         "--epigenetics-dir",
-        default="/home/jakub/Desktop/pol-ii-speed/epigenetics/epigenetic_marks/BRD4",
+        default=f"/home/jakub/Desktop/pol-ii-speed/epigenetics/epigenetic_marks/{gene}",
         help="Directory containing {mark}/chipseq_metrics.tsv files",
     )
     parser.add_argument(
         "--out-dir",
-        default="/home/jakub/Desktop/pol-ii-speed/epigenetics/results/BRD4/correlations",
+        default=f"/home/jakub/Desktop/pol-ii-speed/epigenetics/results/{gene}/correlations",
         help="Output directory for correlation TSV and plots",
     )
     parser.add_argument(
